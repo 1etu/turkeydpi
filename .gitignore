@@ -1,0 +1,22 @@
+# Rust
+target/
+Cargo.lock
+
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj
+xcuserdata/
+DerivedData/
+TurkeyDPI-App/TurkeyDPI.app/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Runtime
+*.sock
+*.log

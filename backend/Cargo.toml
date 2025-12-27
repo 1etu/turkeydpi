@@ -1,0 +1,20 @@
+[package]
+name = "backend"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Backend implementations for packet capture and relay"
+
+[dependencies]
+tokio = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+async-trait = "0.1"
+
+engine = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }

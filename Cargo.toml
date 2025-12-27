@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "engine",
+    "backend",
+    "control",
+    "cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["1etu"]
+license = "MIT"
+repository = "https://github.com/1etu/turkeydpi"
+
+[workspace.dependencies]
+tokio = { version = "1.35", features = ["full"] }
+bytes = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+parking_lot = "0.12"
+lru = "0.12"
+ipnet = "2.9"
+clap = { version = "4.4", features = ["derive"] }
+tokio-test = "0.4"
+tempfile = "3"
+engine = { path = "engine" }
+backend = { path = "backend" }
+control = { path = "control" }

@@ -1,0 +1,98 @@
+# This file demonstrates all available configuration options
+
+[global]
+enabled = true # Master switch to enable/disable the engine
+
+# Global transform toggles (can be overridden by rules)
+enable_fragmentation = true
+enable_jitter = false
+enable_padding = true
+enable_header_normalization = true
+
+# Logging configuration
+log_level = "info"  # trace, debug, info, warn, error
+json_logging = false
+
+# Rule definitions - applied in priority order (highest first)
+[[rules]]
+name = "https-evasion"
+enabled = true
+priority = 100
+transforms = ["fragment", "padding"]
+# Optional per-rule pameter overrides (as JSON values)
+# overrides = { "fragment.max_size" = 20 }
+
+[rules.match_criteria]
+dst_ports = [443]
+protocols = ["tcp"]
+
+[[rules]]
+name = "http-evasion"
+enabled = true
+priority = 90
+transforms = ["resegment", "padding"]
+
+[rules.match_criteria]
+dst_ports = [80, 8080]
+protocols = ["tcp"]
+
+[[rules]]
+name = "dns-protection"
+enabled = true
+priority = 80
+transforms = ["padding"]
+
+[rules.match_criteria]
+dst_ports = [53]
+protocols = ["udp"]
+
+[[rules]]
+name = "sensitive-domains"
+enabled = false
+priority = 110
+transforms = ["fragment", "jitter", "padding"]
+
+[rules.match_criteria]
+dst_ip = ["104.16.0.0/12", "172.64.0.0/13"]
+dst_ports = [443]
+protocols = ["tcp"]
+
+# Resource limits for safety
+[limits]
+max_flows = 10000
+max_queue_size = 1000
+max_memory_mb = 128
+max_jitter_ms = 500
+flow_timeout_secs = 120
+log_rate_limit = 100
+
+# Transform-specific parameters
+[transforms.fragment]
+min_size = 1
+max_size = 40
+randomize = true
+
+[transforms.resegment]
+min_segment_size = 1
+max_segment_size = 100
+max_segments = 10
+
+[transforms.padding]
+min_bytes = 0
+max_bytes = 64
+fill = "random"
+
+[transforms.jitter]
+min_ms = 0
+max_ms = 50
+distribution = "uniform"
+
+[transforms.header]
+randomize_ip_id = true
+strip_tcp_timestamps = false
+
+[transforms.decoy]
+probability = 0.1
+send_before = false
+send_after = true
+max_per_flow = 3
