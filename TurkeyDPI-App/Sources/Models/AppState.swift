@@ -226,7 +226,7 @@ class ProxyContainer: ObservableObject, Identifiable {
     }
     
     func stop() async {
-        guard status == .running else { return }
+        guard status == .running || status == .starting else { return }
         
         status = .stopping
         addLog("Stopping proxy...", type: .info)
@@ -236,7 +236,16 @@ class ProxyContainer: ObservableObject, Identifiable {
             addLog("System proxies disabled", type: .info)
         }
         
-        process?.terminate()
+        // Force kill the process
+        if let proc = process {
+            proc.terminate()
+            
+            // Give it a moment, then force kill if needed
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+            }
+        }
         process = nil
         
         outputPipe?.fileHandleForReading.readabilityHandler = nil

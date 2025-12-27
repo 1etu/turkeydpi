@@ -31,6 +31,8 @@ struct TurkeyDPIApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        killStale()
+        
         NSApplication.shared.setActivationPolicy(.regular)
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -48,6 +50,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.sendAction(Selector(("newWindowForTab:")), to: nil, from: nil)
             }
         }
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        killStale()
+        
+        Task {
+            await SystemProxy.disableAllProxies()
+        }
+    }
+    
+    private func killStale() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        process.arguments = ["-9", "-f", "turkeydpi-engine"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
