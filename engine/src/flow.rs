@@ -207,7 +207,7 @@ impl<'a> FlowContext<'a> {
             timestamp: Instant::now(),
             direction: FlowDirection::Outbound,
             is_first_packet,
-            output_packets: Vec::new(),
+            output_packets: Vec::with_capacity(4),
             delay: None,
             drop: false,
         }

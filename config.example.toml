@@ -19,7 +19,7 @@ name = "https-evasion"
 enabled = true
 priority = 100
 transforms = ["fragment", "padding"]
-# Optional per-rule pameter overrides (as JSON values)
+# Optional per-rule parameter overrides (as JSON values)
 # overrides = { "fragment.max_size" = 20 }
 
 [rules.match_criteria]
