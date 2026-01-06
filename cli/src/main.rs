@@ -75,8 +75,7 @@ enum Commands {
 
 fn setup_logging(level: &str, json: bool) -> Result<()> {
     let level = level.parse::<Level>().unwrap_or(Level::INFO);
-    let filter = EnvFilter::from_default_env()
-        .add_directive(level.into());
+    let filter = EnvFilter::from_default_env().add_directive(level.into());
 
     let subscriber = fmt::Subscriber::builder()
         .with_env_filter(filter)
@@ -121,8 +120,9 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
 
     if proxy {
         info!(listen = %listen, "Starting proxy backend");
-        
-        let listen_addr: std::net::SocketAddr = listen.parse()
+
+        let listen_addr: std::net::SocketAddr = listen
+            .parse()
             .with_context(|| format!("Invalid listen address: {}", listen))?;
 
         let backend_config = backend::BackendConfig {
@@ -142,12 +142,11 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
         tokio::signal::ctrl_c().await?;
         info!("Received shutdown signal");
 
-        
         handle.shutdown().await?;
         backend.stop().await?;
     } else {
         info!("Running in control-only mode (use --proxy to start proxy backend)");
-        
+
         tokio::signal::ctrl_c().await?;
         info!("Received shutdown signal");
     }
@@ -160,10 +159,15 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
 
 async fn send_command<F, T>(socket: &PathBuf, action: F) -> Result<T>
 where
-    F: FnOnce(&mut ControlClient) -> std::pin::Pin<Box<dyn std::future::Future<Output = control::Result<T>> + Send + '_>>,
+    F: FnOnce(
+        &mut ControlClient,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = control::Result<T>> + Send + '_>,
+    >,
 {
     let mut client = ControlClient::new(socket);
-    action(&mut client).await
+    action(&mut client)
+        .await
         .with_context(|| format!("Failed to connect to {}", socket.display()))
 }
 
@@ -191,19 +195,20 @@ impl IspPreset {
 }
 
 async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<()> {
-    let listen_addr = listen.parse()
+    let listen_addr = listen
+        .parse()
         .with_context(|| format!("Invalid listen address: {}", listen))?;
-    
+
     let config = ProxyConfig {
         listen_addr,
         bypass: preset.to_bypass_config(),
         verbose,
         ..Default::default()
     };
-    
+
     let mut proxy = BypassProxy::new(config);
     proxy.run().await?;
-    
+
     Ok(())
 }
 
@@ -211,12 +216,19 @@ async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<(
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if !matches!(cli.command, Commands::GenConfig { .. } | Commands::Bypass { .. }) {
+    if !matches!(
+        cli.command,
+        Commands::GenConfig { .. } | Commands::Bypass { .. }
+    ) {
         setup_logging(&cli.log_level, cli.json_logs)?;
     }
 
     match &cli.command {
-        Commands::Bypass { listen, preset, verbose } => {
+        Commands::Bypass {
+            listen,
+            preset,
+            verbose,
+        } => {
             if *verbose {
                 setup_logging("debug", cli.json_logs)?;
             } else {
@@ -244,13 +256,16 @@ async fn main() -> Result<()> {
         Commands::Status => {
             let mut client = ControlClient::new(&cli.socket);
             let status = client.status().await?;
-            
+
             println!("Status:");
             println!("  State: {:?}", status.state);
             println!("  Running: {}", status.running);
             println!("  Active flows: {}", status.active_flows);
             println!("  Packets processed: {}", status.packets_processed);
-            println!("  Bytes processed: {}", format_bytes(status.bytes_processed));
+            println!(
+                "  Bytes processed: {}",
+                format_bytes(status.bytes_processed)
+            );
             println!("  Errors: {}", status.error_count);
             if let Some(ref err) = status.last_error {
                 println!("  Last error: {}", err);
@@ -263,7 +278,7 @@ async fn main() -> Result<()> {
         Commands::Health => {
             let mut client = ControlClient::new(&cli.socket);
             let health = client.health().await?;
-            
+
             println!("Health:");
             println!("  Version: {}", health.version);
             println!("  API Version: {}", health.api_version);
@@ -278,7 +293,7 @@ async fn main() -> Result<()> {
         Commands::Stats => {
             let mut client = ControlClient::new(&cli.socket);
             let response = client.send(control::Command::GetStats).await?;
-            
+
             if let control::ResponseData::Stats(stats) = response.data {
                 println!("Statistics:");
                 println!("  Packets in:       {}", stats.packets_in);
@@ -304,22 +319,20 @@ async fn main() -> Result<()> {
             println!("Statistics reset");
         }
 
-        Commands::Validate { config } => {
-            match Config::load_from_file(config) {
-                Ok(_) => {
-                    println!("✓ Configuration is valid: {}", config.display());
-                }
-                Err(e) => {
-                    eprintln!("✗ Configuration error: {}", e);
-                    std::process::exit(1);
-                }
+        Commands::Validate { config } => match Config::load_from_file(config) {
+            Ok(_) => {
+                println!("✓ Configuration is valid: {}", config.display());
             }
-        }
+            Err(e) => {
+                eprintln!("✗ Configuration error: {}", e);
+                std::process::exit(1);
+            }
+        },
 
         Commands::Reload { config } => {
             let new_config = Config::load_from_file(config)
                 .with_context(|| format!("Failed to load config from {}", config.display()))?;
-            
+
             let mut client = ControlClient::new(&cli.socket);
             client.send(control::Command::Reload(new_config)).await?;
             println!("Configuration reloaded");
@@ -327,7 +340,7 @@ async fn main() -> Result<()> {
 
         Commands::GenConfig { format, output } => {
             let config = create_example_config();
-            
+
             let content = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&config)?,
                 "toml" | _ => toml::to_string_pretty(&config)?,
@@ -385,10 +398,7 @@ fn create_example_config() -> Config {
                     protocols: Some(vec![Protocol::Tcp]),
                     ..Default::default()
                 },
-                transforms: vec![
-                    TransformType::Fragment,
-                    TransformType::Padding,
-                ],
+                transforms: vec![TransformType::Fragment, TransformType::Padding],
                 overrides: HashMap::new(),
             },
             Rule {
@@ -400,9 +410,7 @@ fn create_example_config() -> Config {
                     protocols: Some(vec![Protocol::Udp]),
                     ..Default::default()
                 },
-                transforms: vec![
-                    TransformType::Padding,
-                ],
+                transforms: vec![TransformType::Padding],
                 overrides: HashMap::new(),
             },
         ],

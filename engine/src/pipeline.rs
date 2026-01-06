@@ -12,17 +12,16 @@ use crate::error::{EngineError, Result};
 use crate::flow::{FlowCache, FlowContext, FlowKey};
 use crate::stats::Stats;
 use crate::transform::{
-    BoxedTransform, TransformResult,
-    FragmentTransform, JitterTransform, PaddingTransform,
-    HeaderNormalizationTransform, ResegmentTransform, DecoyTransform,
+    BoxedTransform, DecoyTransform, FragmentTransform, HeaderNormalizationTransform,
+    JitterTransform, PaddingTransform, ResegmentTransform, TransformResult,
 };
 
 #[derive(Debug)]
 pub struct PipelineOutput {
     pub primary: Option<BytesMut>,
-    pub additional: Vec<BytesMut>,    
-    pub delay: Option<std::time::Duration>,    
-    pub dropped: bool,    
+    pub additional: Vec<BytesMut>,
+    pub delay: Option<std::time::Duration>,
+    pub dropped: bool,
     pub matched_rule: Option<String>,
 }
 
@@ -60,14 +59,14 @@ impl PipelineOutput {
 pub struct Pipeline {
     config: RwLock<Arc<Config>>,
     flow_cache: FlowCache,
-    stats: Arc<Stats>,    
-    transforms: RwLock<HashMap<TransformType, BoxedTransform>>,    
+    stats: Arc<Stats>,
+    transforms: RwLock<HashMap<TransformType, BoxedTransform>>,
     compiled_rules: RwLock<Vec<CompiledRule>>,
 }
 
 struct CompiledRule {
-    rule: Rule,    
-    dst_nets: Vec<IpNet>,    
+    rule: Rule,
+    dst_nets: Vec<IpNet>,
     src_nets: Vec<IpNet>,
 }
 
@@ -84,7 +83,7 @@ impl CompiledRule {
                 .map_err(|e| EngineError::Config(format!("Invalid IP: {}", e)))?,
             None => Vec::new(),
         };
-        
+
         let src_nets = match &rule.match_criteria.src_ip {
             Some(ips) => ips
                 .iter()
@@ -96,7 +95,7 @@ impl CompiledRule {
                 .map_err(|e| EngineError::Config(format!("Invalid IP: {}", e)))?,
             None => Vec::new(),
         };
-        
+
         Ok(Self {
             rule,
             dst_nets,
@@ -106,39 +105,39 @@ impl CompiledRule {
 
     fn matches(&self, key: &FlowKey) -> bool {
         let criteria = &self.rule.match_criteria;
-        
+
         if let Some(ref protocols) = criteria.protocols {
             if !protocols.contains(&key.protocol) {
                 return false;
             }
         }
-        
+
         if let Some(ref ports) = criteria.dst_ports {
             if !ports.contains(&key.dst_port) {
                 return false;
             }
         }
-        
+
         if let Some(ref ports) = criteria.src_ports {
             if !ports.contains(&key.src_port) {
                 return false;
             }
         }
-        
+
         if !self.dst_nets.is_empty() {
             let matches_any = self.dst_nets.iter().any(|net| net.contains(&key.dst_ip));
             if !matches_any {
                 return false;
             }
         }
-        
+
         if !self.src_nets.is_empty() {
             let matches_any = self.src_nets.iter().any(|net| net.contains(&key.src_ip));
             if !matches_any {
                 return false;
             }
         }
-        
+
         true
     }
 }
@@ -146,11 +145,11 @@ impl CompiledRule {
 impl Pipeline {
     pub fn new(config: Config, stats: Arc<Stats>) -> Result<Self> {
         config.validate()?;
-        
+
         let flow_cache = FlowCache::new(&config.limits);
         let transforms = Self::create_transforms(&config);
         let compiled_rules = Self::compile_rules(&config.rules)?;
-        
+
         Ok(Self {
             config: RwLock::new(Arc::new(config)),
             flow_cache,
@@ -163,7 +162,7 @@ impl Pipeline {
     fn create_transforms(config: &Config) -> HashMap<TransformType, BoxedTransform> {
         let params = &config.transforms;
         let mut transforms: HashMap<TransformType, BoxedTransform> = HashMap::new();
-        
+
         transforms.insert(
             TransformType::Fragment,
             Box::new(FragmentTransform::new(&params.fragment)),
@@ -188,7 +187,7 @@ impl Pipeline {
             TransformType::Decoy,
             Box::new(DecoyTransform::new(&params.decoy)),
         );
-        
+
         transforms
     }
 
@@ -199,18 +198,18 @@ impl Pipeline {
             .cloned()
             .map(CompiledRule::compile)
             .collect::<Result<Vec<_>>>()?;
-        
+
         compiled.sort_by(|a, b| b.rule.priority.cmp(&a.rule.priority));
-        
+
         Ok(compiled)
     }
 
     pub fn reload_config(&self, new_config: Config) -> Result<()> {
         new_config.validate()?;
-        
+
         let new_transforms = Self::create_transforms(&new_config);
         let new_compiled = Self::compile_rules(&new_config.rules)?;
-        
+
         {
             let mut transforms = self.transforms.write();
             *transforms = new_transforms;
@@ -223,7 +222,7 @@ impl Pipeline {
             let mut config = self.config.write();
             *config = Arc::new(new_config);
         }
-        
+
         debug!("Configuration reloaded successfully");
         Ok(())
     }
@@ -234,7 +233,7 @@ impl Pipeline {
 
     fn find_matching_rule(&self, key: &FlowKey) -> Option<Rule> {
         let compiled = self.compiled_rules.read();
-        
+
         for compiled_rule in compiled.iter() {
             if compiled_rule.matches(key) {
                 trace!(
@@ -245,32 +244,32 @@ impl Pipeline {
                 return Some(compiled_rule.rule.clone());
             }
         }
-        
+
         None
     }
 
     pub fn process(&self, key: FlowKey, mut data: BytesMut) -> Result<PipelineOutput> {
         let config = self.config.read().clone();
-        
+
         if !config.global.enabled {
             return Ok(PipelineOutput::passthrough(data));
         }
-        
+
         self.stats.record_packet_in(data.len());
-        
+
         let mut flow_state = self.flow_cache.get_or_create(key);
         let is_new_flow = flow_state.packet_count == 0;
-        
+
         if is_new_flow {
             self.stats.record_flow_created();
         }
-        
+
         let matched_rule = self.find_matching_rule(&key);
-        
+
         if matched_rule.is_some() {
             self.stats.record_match();
         }
-        
+
         let rule = match matched_rule {
             Some(r) => r,
             None => {
@@ -279,12 +278,12 @@ impl Pipeline {
                 return Ok(PipelineOutput::passthrough(data));
             }
         };
-        
+
         let rule_ref = &rule;
         let mut ctx = FlowContext::new(&key, &mut flow_state, Some(rule_ref));
-        
+
         let transforms = self.transforms.read();
-        
+
         for transform_type in &rule.transforms {
             let enabled = match transform_type {
                 TransformType::Fragment => config.global.enable_fragmentation,
@@ -293,11 +292,11 @@ impl Pipeline {
                 TransformType::HeaderNormalization => config.global.enable_header_normalization,
                 _ => true,
             };
-            
+
             if !enabled {
                 continue;
             }
-            
+
             let transform = match transforms.get(transform_type) {
                 Some(t) => t,
                 None => {
@@ -305,13 +304,13 @@ impl Pipeline {
                     continue;
                 }
             };
-            
+
             trace!(
                 transform = transform.name(),
                 flow = ?key,
                 "applying transform"
             );
-            
+
             let result = match transform.apply(&mut ctx, &mut data) {
                 Ok(r) => r,
                 Err(e) => {
@@ -324,7 +323,7 @@ impl Pipeline {
                     continue;
                 }
             };
-            
+
             match result {
                 TransformResult::Continue => {}
                 TransformResult::Fragmented => {
@@ -351,29 +350,29 @@ impl Pipeline {
                 }
             }
         }
-        
+
         ctx.state.update(data.len());
         ctx.state.matched_rule = Some(rule.name.clone());
-        
+
         let should_drop = ctx.drop;
         let output_packets = std::mem::take(&mut ctx.output_packets);
         let delay = ctx.delay;
-        
+
         drop(transforms);
         drop(ctx);
-        
+
         self.flow_cache.update(flow_state);
-        
+
         if should_drop {
             self.stats.record_drop();
             return Ok(PipelineOutput::dropped());
         }
-        
+
         self.stats.record_packet_out(data.len());
         for packet in &output_packets {
             self.stats.record_packet_out(packet.len());
         }
-        
+
         Ok(PipelineOutput {
             primary: Some(data),
             additional: output_packets,
@@ -403,8 +402,8 @@ impl Pipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
     use crate::config::{MatchCriteria, Protocol};
+    use std::net::Ipv4Addr;
 
     fn test_config() -> Config {
         let mut config = Config::default();
@@ -446,12 +445,12 @@ mod tests {
         let config = test_config();
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats).unwrap();
-        
+
         let key_443 = test_flow_key(443);
         let rule = pipeline.find_matching_rule(&key_443);
         assert!(rule.is_some());
         assert_eq!(rule.unwrap().name, "test-https");
-        
+
         let key_80 = test_flow_key(80);
         let rule = pipeline.find_matching_rule(&key_80);
         assert!(rule.is_none());
@@ -461,15 +460,15 @@ mod tests {
     fn test_pipeline_passthrough() {
         let mut config = Config::default();
         config.global.enabled = true;
-        
+
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats.clone()).unwrap();
-        
+
         let key = test_flow_key(80);
         let data = BytesMut::from(&b"test data"[..]);
-        
+
         let output = pipeline.process(key, data.clone()).unwrap();
-        
+
         assert!(!output.dropped);
         assert!(output.primary.is_some());
         assert_eq!(output.primary.unwrap(), data);
@@ -480,15 +479,15 @@ mod tests {
     fn test_pipeline_disabled() {
         let mut config = Config::default();
         config.global.enabled = false;
-        
+
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats).unwrap();
-        
+
         let key = test_flow_key(443);
         let data = BytesMut::from(&b"test data"[..]);
-        
+
         let output = pipeline.process(key, data.clone()).unwrap();
-        
+
         assert!(!output.dropped);
         assert!(output.primary.is_some());
         assert_eq!(output.primary.unwrap(), data);
@@ -499,18 +498,18 @@ mod tests {
         let config = test_config();
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats.clone()).unwrap();
-        
+
         let key = test_flow_key(443);
         let data = BytesMut::from(&b"This is a longer test message for fragmentation testing"[..]);
         let original_len = data.len();
-        
+
         let output = pipeline.process(key, data).unwrap();
-        
+
         assert!(!output.dropped);
         assert!(output.matched_rule.is_some());
-        
+
         let total_len: usize = output.all_packets().iter().map(|p| p.len()).sum();
-        assert!(total_len >= original_len); 
+        assert!(total_len >= original_len);
     }
 
     #[test]
@@ -518,12 +517,12 @@ mod tests {
         let config = test_config();
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats.clone()).unwrap();
-        
+
         let key = test_flow_key(443);
         let data = BytesMut::from(&b"test data"[..]);
-        
+
         let _ = pipeline.process(key, data);
-        
+
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.packets_in, 1);
         assert!(snapshot.packets_out >= 1);
@@ -535,7 +534,7 @@ mod tests {
         let config = test_config();
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats).unwrap();
-        
+
         let mut new_config = Config::default();
         new_config.rules.push(Rule {
             name: "new-rule".to_string(),
@@ -548,9 +547,9 @@ mod tests {
             transforms: vec![TransformType::Padding],
             overrides: HashMap::new(),
         });
-        
+
         assert!(pipeline.reload_config(new_config).is_ok());
-        
+
         let key = FlowKey::new(
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
@@ -566,7 +565,7 @@ mod tests {
     #[test]
     fn test_rule_priority() {
         let mut config = Config::default();
-        
+
         config.rules.push(Rule {
             name: "catch-all".to_string(),
             enabled: true,
@@ -575,7 +574,7 @@ mod tests {
             transforms: vec![TransformType::Padding],
             overrides: HashMap::new(),
         });
-        
+
         config.rules.push(Rule {
             name: "specific".to_string(),
             enabled: true,
@@ -587,10 +586,10 @@ mod tests {
             transforms: vec![TransformType::Fragment],
             overrides: HashMap::new(),
         });
-        
+
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats).unwrap();
-        
+
         let key = test_flow_key(443);
         let rule = pipeline.find_matching_rule(&key);
         assert!(rule.is_some());
@@ -611,10 +610,10 @@ mod tests {
             transforms: vec![TransformType::Padding],
             overrides: HashMap::new(),
         });
-        
+
         let stats = Arc::new(Stats::new());
         let pipeline = Pipeline::new(config, stats).unwrap();
-        
+
         let key1 = FlowKey::new(
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
             IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
@@ -623,7 +622,7 @@ mod tests {
             Protocol::Udp,
         );
         assert!(pipeline.find_matching_rule(&key1).is_some());
-        
+
         let key2 = FlowKey::new(
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
             IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),

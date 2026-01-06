@@ -188,7 +188,7 @@ fn test_pipeline_multi_transform() {
     assert!(output.matched_rule.is_some());
 
     let all_packets = output.all_packets();
-    
+
     let total_len: usize = all_packets.iter().map(|p| p.len()).sum();
     assert!(
         total_len > original_len,
@@ -244,7 +244,7 @@ fn test_pipeline_flow_tracking() {
     }
 
     assert!(!pipeline.flow_cache().is_empty());
-    
+
     let cache_stats = pipeline.flow_cache().stats();
     assert!(cache_stats.size >= 1);
 }
@@ -292,7 +292,7 @@ fn test_multiple_rules_priority() {
             Rule {
                 name: "https-specific".to_string(),
                 enabled: true,
-                priority: 100, 
+                priority: 100,
                 match_criteria: MatchCriteria {
                     dst_ports: Some(vec![443]),
                     protocols: Some(vec![Protocol::Tcp]),

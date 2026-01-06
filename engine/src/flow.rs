@@ -58,21 +58,21 @@ impl FlowKey {
 #[derive(Debug)]
 pub struct FlowState {
     pub key: FlowKey,
-    
+
     pub created_at: Instant,
-    
+
     pub last_seen: Instant,
-    
+
     pub packet_count: u64,
-    
+
     pub byte_count: u64,
-    
+
     pub matched_rule: Option<String>,
-    
+
     pub direction: FlowDirection,
-    
+
     pub tcp_state: Option<TcpFlowState>,
-    
+
     pub transform_state: TransformState,
 }
 
@@ -124,81 +124,77 @@ pub enum FlowDirection {
 #[derive(Debug, Default)]
 pub struct TcpFlowState {
     pub seen_syn: bool,
-    
+
     pub seen_syn_ack: bool,
-    
+
     pub established: bool,
-    
+
     pub seen_fin: bool,
-    
+
     pub closed: bool,
-    
+
     pub initial_seq: Option<u32>,
-    
+
     pub current_seq: Option<u32>,
-    
+
     pub segments_sent: u32,
-    
+
     pub reassembly_bytes: usize,
 }
 
 #[derive(Debug, Default)]
 pub struct TransformState {
     pub fragment: FragmentState,
-    
+
     pub jitter: JitterState,
-    
+
     pub resegment: ResegmentState,
 }
 
 #[derive(Debug, Default)]
 pub struct FragmentState {
     pub fragments_generated: u32,
-    
+
     pub pending: Option<BytesMut>,
 }
 
 #[derive(Debug, Default)]
 pub struct JitterState {
     pub last_jitter_ms: u64,
-    
+
     pub total_jitter_ms: u64,
 }
 
 #[derive(Debug, Default)]
 pub struct ResegmentState {
     pub buffer: BytesMut,
-    
+
     pub segments_generated: u32,
 }
 
 #[derive(Debug)]
 pub struct FlowContext<'a> {
     pub key: &'a FlowKey,
-    
+
     pub state: &'a mut FlowState,
-    
+
     pub rule: Option<&'a Rule>,
-    
+
     pub timestamp: Instant,
-    
+
     pub direction: FlowDirection,
-    
+
     pub is_first_packet: bool,
-    
+
     pub output_packets: Vec<BytesMut>,
-    
+
     pub delay: Option<Duration>,
-    
+
     pub drop: bool,
 }
 
 impl<'a> FlowContext<'a> {
-    pub fn new(
-        key: &'a FlowKey,
-        state: &'a mut FlowState,
-        rule: Option<&'a Rule>,
-    ) -> Self {
+    pub fn new(key: &'a FlowKey, state: &'a mut FlowState, rule: Option<&'a Rule>) -> Self {
         let is_first_packet = state.packet_count == 0;
         Self {
             key,
@@ -255,10 +251,10 @@ impl FlowCache {
 
     pub fn get_or_create(&self, key: FlowKey) -> FlowState {
         let mut cache = self.cache.write();
-        
+
         if let Some(state) = cache.get_mut(&key) {
             self.hit_count.fetch_add(1, Ordering::Relaxed);
-            
+
             FlowState {
                 key: state.key,
                 created_at: state.created_at,
@@ -267,17 +263,16 @@ impl FlowCache {
                 byte_count: state.byte_count,
                 matched_rule: state.matched_rule.clone(),
                 direction: state.direction,
-                tcp_state: None, 
+                tcp_state: None,
                 transform_state: TransformState::default(),
             }
         } else {
             self.miss_count.fetch_add(1, Ordering::Relaxed);
-            
-            
+
             if cache.len() >= self.max_size {
                 self.eviction_count.fetch_add(1, Ordering::Relaxed);
             }
-            
+
             let state = FlowState::new(key);
             let result = FlowState::new(key);
             cache.put(key, state);
@@ -293,20 +288,19 @@ impl FlowCache {
     pub fn cleanup(&self) -> usize {
         let mut cache = self.cache.write();
         let timeout = self.timeout;
-        
+
         let before = cache.len();
-        
-        
+
         let expired: Vec<FlowKey> = cache
             .iter()
             .filter(|(_, state)| state.is_expired(timeout))
             .map(|(key, _)| *key)
             .collect();
-        
+
         for key in &expired {
             cache.pop(key);
         }
-        
+
         before - cache.len()
     }
 
@@ -373,7 +367,7 @@ mod tests {
     fn test_flow_key_reverse() {
         let key = test_key();
         let reversed = key.reverse();
-        
+
         assert_eq!(reversed.src_ip, key.dst_ip);
         assert_eq!(reversed.dst_ip, key.src_ip);
         assert_eq!(reversed.src_port, key.dst_port);
@@ -384,7 +378,7 @@ mod tests {
     fn test_flow_state_update() {
         let key = test_key();
         let mut state = FlowState::new(key);
-        
+
         assert_eq!(state.packet_count, 0);
         state.update(100);
         assert_eq!(state.packet_count, 1);
@@ -396,15 +390,13 @@ mod tests {
         let limits = Limits::default();
         let cache = FlowCache::new(&limits);
         let key = test_key();
-        
-        
+
         let _state = cache.get_or_create(key);
         assert_eq!(cache.len(), 1);
-        
-        
+
         let _state = cache.get_or_create(key);
         assert_eq!(cache.len(), 1);
-        
+
         let stats = cache.stats();
         assert_eq!(stats.miss_count, 1);
         assert_eq!(stats.hit_count, 1);
@@ -415,7 +407,7 @@ mod tests {
         let mut limits = Limits::default();
         limits.max_flows = 2;
         let cache = FlowCache::new(&limits);
-        
+
         let key1 = FlowKey::new(
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
             IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
@@ -437,15 +429,14 @@ mod tests {
             80,
             Protocol::Tcp,
         );
-        
+
         cache.get_or_create(key1);
         cache.get_or_create(key2);
         assert_eq!(cache.len(), 2);
-        
-        
+
         cache.get_or_create(key3);
         assert_eq!(cache.len(), 2);
-        
+
         let stats = cache.stats();
         assert_eq!(stats.eviction_count, 1);
     }

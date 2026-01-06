@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use engine::Config;
 use engine::stats::StatsSnapshot;
+use engine::Config;
 
 pub const API_VERSION: &str = "1.0.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
-    pub id: u64,    
+    pub id: u64,
     pub command: Command,
 }
 
@@ -21,22 +21,22 @@ impl Request {
 #[serde(tag = "type", content = "data")]
 #[serde(rename_all = "snake_case")]
 pub enum Command {
-    Health,    
-    Start,    
-    Stop,    
-    GetConfig,    
-    SetConfig(Config),    
-    Reload(Config),    
-    GetStats,    
+    Health,
+    Start,
+    Stop,
+    GetConfig,
+    SetConfig(Config),
+    Reload(Config),
+    GetStats,
     ResetStats,
-    GetStatus,    
+    GetStatus,
     Ping,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
-    pub id: u64,    
-    pub success: bool,    
+    pub id: u64,
+    pub success: bool,
     #[serde(flatten)]
     pub data: ResponseData,
 }
@@ -69,28 +69,28 @@ impl Response {
 pub enum ResponseData {
     Ok,
     Error { message: String },
-    Health(HealthInfo),    
-    Config(Config),    
-    Stats(StatsSnapshot),    
-    Status(Status),    
-    Pong { timestamp: u64 },    
+    Health(HealthInfo),
+    Config(Config),
+    Stats(StatsSnapshot),
+    Status(Status),
+    Pong { timestamp: u64 },
     Validation { valid: bool, errors: Vec<String> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthInfo {
-    pub running: bool,    
-    pub version: String,    
-    pub api_version: String,    
-    pub uptime_secs: u64,    
-    pub backend: Option<String>,    
+    pub running: bool,
+    pub version: String,
+    pub api_version: String,
+    pub uptime_secs: u64,
+    pub backend: Option<String>,
     pub system: SystemInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfo {
-    pub os: String,    
-    pub arch: String,    
+    pub os: String,
+    pub arch: String,
     pub rust_version: String,
 }
 
@@ -106,13 +106,13 @@ impl Default for SystemInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Status {
-    pub running: bool,    
-    pub state: EngineState,    
-    pub active_flows: u64,    
-    pub packets_processed: u64,    
-    pub bytes_processed: u64,    
-    pub error_count: u64,    
-    pub last_error: Option<String>,    
+    pub running: bool,
+    pub state: EngineState,
+    pub active_flows: u64,
+    pub packets_processed: u64,
+    pub bytes_processed: u64,
+    pub error_count: u64,
+    pub last_error: Option<String>,
     pub config_path: Option<String>,
 }
 
@@ -120,9 +120,9 @@ pub struct Status {
 #[serde(rename_all = "snake_case")]
 pub enum EngineState {
     Stopped,
-    Starting,    
-    Running,    
-    Stopping,    
+    Starting,
+    Running,
+    Stopping,
     Error,
 }
 
@@ -137,8 +137,8 @@ pub struct Notification {
 #[serde(tag = "notification", content = "data")]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationKind {
-    StateChanged { old: EngineState, new: EngineState },    
-    ConfigReloaded,    
+    StateChanged { old: EngineState, new: EngineState },
+    ConfigReloaded,
     Error { message: String },
     StatsUpdate(StatsSnapshot),
 }
@@ -152,7 +152,7 @@ mod tests {
         let request = Request::new(1, Command::Health);
         let json = serde_json::to_string(&request).unwrap();
         let parsed: Request = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.id, 1);
         assert!(matches!(parsed.command, Command::Health));
     }
@@ -168,7 +168,7 @@ mod tests {
     fn test_response_error() {
         let response = Response::error(42, "test error".to_string());
         assert!(!response.success);
-        
+
         if let ResponseData::Error { message } = response.data {
             assert_eq!(message, "test error");
         } else {
@@ -187,7 +187,7 @@ mod tests {
             Command::GetStatus,
             Command::Ping,
         ];
-        
+
         for cmd in commands {
             let json = serde_json::to_string(&cmd).unwrap();
             let _: Command = serde_json::from_str(&json).unwrap();
@@ -204,10 +204,10 @@ mod tests {
             backend: Some("proxy".to_string()),
             system: SystemInfo::default(),
         };
-        
+
         let json = serde_json::to_string(&health).unwrap();
         let parsed: HealthInfo = serde_json::from_str(&json).unwrap();
-        
+
         assert!(parsed.running);
         assert_eq!(parsed.uptime_secs, 3600);
     }
@@ -224,10 +224,10 @@ mod tests {
             last_error: None,
             config_path: Some("/etc/turkeydpi/config.toml".to_string()),
         };
-        
+
         let json = serde_json::to_string(&status).unwrap();
         let parsed: Status = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.state, EngineState::Running);
         assert_eq!(parsed.active_flows, 100);
     }

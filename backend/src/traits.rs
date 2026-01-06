@@ -18,8 +18,8 @@ pub enum PacketDirection {
 #[derive(Debug, Clone)]
 pub struct Packet {
     pub data: BytesMut,
-    pub direction: PacketDirection,    
-    pub flow_key: Option<FlowKey>,    
+    pub direction: PacketDirection,
+    pub flow_key: Option<FlowKey>,
     pub timestamp: std::time::Instant,
 }
 
@@ -50,8 +50,8 @@ impl Packet {
 
 #[derive(Debug, Clone)]
 pub struct BackendConfig {
-    pub engine_config: Config,    
-    pub max_queue_size: usize,    
+    pub engine_config: Config,
+    pub max_queue_size: usize,
     pub backend_settings: BackendSettings,
 }
 
@@ -73,9 +73,9 @@ pub enum BackendSettings {
 
 #[derive(Debug, Clone)]
 pub struct TunSettings {
-    pub device_name: Option<String>,    
-    pub mtu: u16,    
-    pub address: String,    
+    pub device_name: Option<String>,
+    pub mtu: u16,
+    pub address: String,
     pub netmask: String,
 }
 
@@ -92,9 +92,9 @@ impl Default for TunSettings {
 
 #[derive(Debug, Clone)]
 pub struct ProxySettings {
-    pub listen_addr: SocketAddr,    
-    pub proxy_type: ProxyType,    
-    pub max_connections: usize,    
+    pub listen_addr: SocketAddr,
+    pub proxy_type: ProxyType,
+    pub max_connections: usize,
     pub timeout_secs: u64,
 }
 
@@ -123,9 +123,10 @@ pub struct BackendHandle {
 
 impl BackendHandle {
     pub async fn shutdown(&self) -> Result<()> {
-        self.shutdown_tx.send(()).await.map_err(|_| {
-            crate::error::BackendError::NotRunning
-        })?;
+        self.shutdown_tx
+            .send(())
+            .await
+            .map_err(|_| crate::error::BackendError::NotRunning)?;
         Ok(())
     }
 
@@ -148,7 +149,6 @@ pub trait Backend: Send + Sync {
 
     fn is_running(&self) -> bool;
     fn is_supported() -> bool
-
     where
         Self: Sized;
 }
@@ -161,7 +161,7 @@ mod tests {
     fn test_packet_creation() {
         let data = BytesMut::from(&b"test packet"[..]);
         let packet = Packet::outbound(data.clone());
-        
+
         assert_eq!(packet.direction, PacketDirection::Outbound);
         assert!(packet.flow_key.is_none());
         assert_eq!(packet.data, data);
@@ -172,7 +172,7 @@ mod tests {
         let tun = TunSettings::default();
         assert_eq!(tun.mtu, 1500);
         assert_eq!(tun.address, "10.0.85.1");
-        
+
         let proxy = ProxySettings::default();
         assert_eq!(proxy.proxy_type, ProxyType::Socks5);
         assert_eq!(proxy.max_connections, 1000);

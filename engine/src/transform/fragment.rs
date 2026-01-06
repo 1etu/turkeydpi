@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use tracing::{debug, trace};
 
+use super::{Transform, TransformResult};
 use crate::config::{FragmentParams, TransformParams};
 use crate::error::Result;
 use crate::flow::FlowContext;
-use super::{Transform, TransformResult};
 
 pub struct FragmentTransform {
     params: FragmentParams,
@@ -34,7 +34,7 @@ impl FragmentTransform {
     pub fn fragment_data(&self, data: &[u8]) -> Vec<BytesMut> {
         let mut fragments = Vec::new();
         let mut offset = 0;
-        
+
         if let Some(split_at) = self.params.split_at_offset {
             if split_at > 0 && split_at < data.len() {
                 let first = BytesMut::from(&data[..split_at]);
@@ -43,11 +43,11 @@ impl FragmentTransform {
                 fragments.push(second);
                 return fragments;
             }
-        }     
+        }
         while offset < data.len() {
             let remaining = data.len() - offset;
             let size = self.calculate_fragment_size(remaining).min(remaining);
-            
+
             let fragment = BytesMut::from(&data[offset..offset + size]);
             fragments.push(fragment);
             offset += size;
@@ -63,7 +63,6 @@ impl Transform for FragmentTransform {
     }
 
     fn apply(&self, ctx: &mut FlowContext<'_>, data: &mut BytesMut) -> Result<TransformResult> {
-        
         if data.len() <= self.params.min_size {
             trace!(
                 flow = ?ctx.key,
@@ -74,7 +73,7 @@ impl Transform for FragmentTransform {
         }
 
         let fragments = self.fragment_data(data);
-        
+
         if fragments.len() <= 1 {
             return Ok(TransformResult::Continue);
         }
@@ -86,13 +85,10 @@ impl Transform for FragmentTransform {
             "fragmented packet"
         );
 
-        
         ctx.state.transform_state.fragment.fragments_generated += fragments.len() as u32;
 
-        
         for (i, fragment) in fragments.into_iter().enumerate() {
             if i == 0 {
-                
                 data.clear();
                 data.extend_from_slice(&fragment);
             } else {
@@ -111,9 +107,9 @@ impl Transform for FragmentTransform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
     use crate::config::Protocol;
     use crate::flow::{FlowKey, FlowState};
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn test_context<'a>(key: &'a FlowKey, state: &'a mut FlowState) -> FlowContext<'a> {
         FlowContext::new(key, state, None)
@@ -143,8 +139,7 @@ mod tests {
         let fragments = transform.fragment_data(data);
 
         assert!(fragments.len() > 1);
-        
-        
+
         let reassembled: Vec<u8> = fragments.iter().flat_map(|f| f.iter().copied()).collect();
         assert_eq!(reassembled.as_slice(), data);
     }
@@ -158,7 +153,7 @@ mod tests {
             randomize: false,
         };
         let transform = FragmentTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = test_context(&key, &mut state);
@@ -204,8 +199,7 @@ mod tests {
 
         let result = transform.apply(&mut ctx, &mut data).unwrap();
         assert_eq!(result, TransformResult::Fragmented);
-        
-        
+
         assert!(data.len() <= 5);
         assert!(!ctx.output_packets.is_empty());
     }
@@ -228,7 +222,6 @@ mod tests {
 
         let _ = transform.apply(&mut ctx, &mut data);
 
-        
         let mut all_data = data.to_vec();
         for packet in &ctx.output_packets {
             all_data.extend_from_slice(packet);

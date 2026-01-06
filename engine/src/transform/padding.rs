@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use tracing::trace;
 
+use super::{Transform, TransformResult};
 use crate::config::{PaddingParams, TransformParams};
 use crate::error::Result;
 use crate::flow::FlowContext;
-use super::{Transform, TransformResult};
 
 pub struct PaddingTransform {
     params: PaddingParams,
@@ -27,7 +27,6 @@ impl PaddingTransform {
             return self.params.min_bytes;
         }
 
-        
         self.params.min_bytes + ((seed as usize) % (range + 1))
     }
 
@@ -35,7 +34,6 @@ impl PaddingTransform {
         match self.params.fill_byte {
             Some(byte) => vec![byte; size],
             None => {
-                
                 let mut padding = Vec::with_capacity(size);
                 let mut value = seed;
                 for _ in 0..size {
@@ -58,19 +56,20 @@ impl Transform for PaddingTransform {
             return Ok(TransformResult::Continue);
         }
 
-        
-        let seed = ctx.state.packet_count
+        let seed = ctx
+            .state
+            .packet_count
             .wrapping_mul(48271)
             .wrapping_add(data.len() as u64);
 
         let padding_size = self.calculate_padding_size(seed);
-        
+
         if padding_size == 0 {
             return Ok(TransformResult::Continue);
         }
 
         let padding = self.generate_padding(padding_size, seed);
-        
+
         trace!(
             flow = ?ctx.key,
             original_size = data.len(),
@@ -91,9 +90,9 @@ impl Transform for PaddingTransform {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
     use crate::config::Protocol;
     use crate::flow::{FlowKey, FlowState};
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn test_flow_key() -> FlowKey {
         FlowKey::new(
@@ -113,7 +112,7 @@ mod tests {
             fill_byte: None,
         };
         let transform = PaddingTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -133,7 +132,7 @@ mod tests {
             fill_byte: Some(0xAB),
         };
         let transform = PaddingTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -143,8 +142,7 @@ mod tests {
         let result = transform.apply(&mut ctx, &mut data).unwrap();
         assert_eq!(result, TransformResult::Continue);
         assert_eq!(data.len(), original.len() + 10);
-        
-        
+
         for i in original.len()..data.len() {
             assert_eq!(data[i], 0xAB);
         }
@@ -158,7 +156,7 @@ mod tests {
             fill_byte: None,
         };
         let transform = PaddingTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -178,7 +176,7 @@ mod tests {
             fill_byte: Some(0x00),
         };
         let transform = PaddingTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -186,8 +184,7 @@ mod tests {
         let mut data = BytesMut::from(&original[..]);
 
         transform.apply(&mut ctx, &mut data).unwrap();
-        
-        
+
         assert_eq!(&data[..original.len()], original);
     }
 
@@ -199,8 +196,7 @@ mod tests {
             fill_byte: None,
         };
         let transform = PaddingTransform::new(&params);
-        
-        
+
         for seed in 0..100u64 {
             let size = transform.calculate_padding_size(seed);
             assert!(size >= 5);

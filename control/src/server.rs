@@ -9,21 +9,21 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
-use engine::{Config, Stats};
-use backend::{Backend, BackendHandle, BackendConfig, BackendSettings, ProxySettings};
 use backend::proxy::ProxyBackend;
+use backend::{Backend, BackendConfig, BackendHandle, BackendSettings, ProxySettings};
+use engine::{Config, Stats};
 
 use crate::error::{ControlError, Result};
 use crate::messages::{
-    Command, EngineState, HealthInfo,
-    Request, Response, ResponseData, Status, SystemInfo, API_VERSION,
+    Command, EngineState, HealthInfo, Request, Response, ResponseData, Status, SystemInfo,
+    API_VERSION,
 };
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    pub socket_path: PathBuf,    
-    pub max_clients: usize,    
-    pub timeout_secs: u64,    
+    pub socket_path: PathBuf,
+    pub max_clients: usize,
+    pub timeout_secs: u64,
     pub enable_notifications: bool,
 }
 
@@ -39,12 +39,12 @@ impl Default for ServerConfig {
 }
 
 struct ServerState {
-    config: RwLock<Config>,    
-    backend_handle: RwLock<Option<BackendHandle>>,    
-    engine_state: RwLock<EngineState>,    
-    start_time: Instant,    
-    backend_type: RwLock<Option<String>>,    
-    last_error: RwLock<Option<String>>,    
+    config: RwLock<Config>,
+    backend_handle: RwLock<Option<BackendHandle>>,
+    engine_state: RwLock<EngineState>,
+    start_time: Instant,
+    backend_type: RwLock<Option<String>>,
+    last_error: RwLock<Option<String>>,
     config_path: RwLock<Option<PathBuf>>,
 }
 
@@ -63,8 +63,8 @@ impl ServerState {
 }
 
 pub struct ControlServer {
-    server_config: ServerConfig,    
-    running: Arc<AtomicBool>,    
+    server_config: ServerConfig,
+    running: Arc<AtomicBool>,
     state: Arc<ServerState>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
@@ -85,19 +85,19 @@ impl ControlServer {
         }
 
         let socket_path = &self.server_config.socket_path;
-        
+
         if socket_path.exists() {
             std::fs::remove_file(socket_path)?;
         }
-        
+
         if let Some(parent) = socket_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
         info!(socket = %socket_path.display(), "Starting control server");
 
-        let listener = UnixListener::bind(socket_path)
-            .map_err(|e| ControlError::BindFailed(e.to_string()))?;
+        let listener =
+            UnixListener::bind(socket_path).map_err(|e| ControlError::BindFailed(e.to_string()))?;
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
@@ -109,7 +109,7 @@ impl ControlServer {
 
         tokio::spawn(async move {
             let mut active_clients = 0usize;
-            
+
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
@@ -123,10 +123,10 @@ impl ControlServer {
                                     warn!("Max clients reached, rejecting connection");
                                     continue;
                                 }
-                                
+
                                 active_clients += 1;
                                 let state = state.clone();
-                                
+
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_client(stream, state).await {
                                         debug!(error = %e, "Client handler error");
@@ -176,7 +176,7 @@ impl ControlServer {
 
         loop {
             line.clear();
-            
+
             let bytes_read = reader.read_line(&mut line).await?;
             if bytes_read == 0 {
                 break;
@@ -231,9 +231,7 @@ impl ControlServer {
                 let backend_config = BackendConfig {
                     engine_config: config,
                     max_queue_size: 1000,
-                    backend_settings: BackendSettings::Proxy(
-                        ProxySettings::default()
-                    ),
+                    backend_settings: BackendSettings::Proxy(ProxySettings::default()),
                 };
 
                 let mut backend = ProxyBackend::new();
@@ -278,22 +276,22 @@ impl ControlServer {
                 Response::success(id, ResponseData::Config(config))
             }
 
-            Command::SetConfig(new_config) => {
-                match new_config.validate() {
-                    Ok(()) => {
-                        Response::success(id, ResponseData::Validation {
-                            valid: true,
-                            errors: vec![],
-                        })
-                    }
-                    Err(e) => {
-                        Response::success(id, ResponseData::Validation {
-                            valid: false,
-                            errors: vec![e.to_string()],
-                        })
-                    }
-                }
-            }
+            Command::SetConfig(new_config) => match new_config.validate() {
+                Ok(()) => Response::success(
+                    id,
+                    ResponseData::Validation {
+                        valid: true,
+                        errors: vec![],
+                    },
+                ),
+                Err(e) => Response::success(
+                    id,
+                    ResponseData::Validation {
+                        valid: false,
+                        errors: vec![e.to_string()],
+                    },
+                ),
+            },
 
             Command::Reload(new_config) => {
                 if let Err(e) = new_config.validate() {
@@ -329,12 +327,13 @@ impl ControlServer {
 
             Command::GetStatus => {
                 let backend_handle = state.backend_handle.read();
-                let (active_flows, packets, bytes, errors) = if let Some(ref handle) = *backend_handle {
-                    let s = handle.stats().snapshot();
-                    (s.active_flows, s.packets_in, s.bytes_in, s.transform_errors)
-                } else {
-                    (0, 0, 0, 0)
-                };
+                let (active_flows, packets, bytes, errors) =
+                    if let Some(ref handle) = *backend_handle {
+                        let s = handle.stats().snapshot();
+                        (s.active_flows, s.packets_in, s.bytes_in, s.transform_errors)
+                    } else {
+                        (0, 0, 0, 0)
+                    };
 
                 let status = Status {
                     running: *state.engine_state.read() == EngineState::Running,
@@ -344,7 +343,11 @@ impl ControlServer {
                     bytes_processed: bytes,
                     error_count: errors,
                     last_error: state.last_error.read().clone(),
-                    config_path: state.config_path.read().as_ref().map(|p| p.display().to_string()),
+                    config_path: state
+                        .config_path
+                        .read()
+                        .as_ref()
+                        .map(|p| p.display().to_string()),
                 };
                 Response::success(id, ResponseData::Status(status))
             }
@@ -362,10 +365,10 @@ impl ControlServer {
     pub fn load_config(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         let config = Config::load_from_file(path)?;
-        
+
         *self.state.config.write() = config;
         *self.state.config_path.write() = Some(path.to_path_buf());
-        
+
         info!(path = %path.display(), "Loaded configuration");
         Ok(())
     }
@@ -416,7 +419,9 @@ impl ControlClient {
         match response.data {
             ResponseData::Health(info) => Ok(info),
             ResponseData::Error { message } => Err(ControlError::Internal(message)),
-            _ => Err(ControlError::InvalidRequest("Unexpected response".to_string())),
+            _ => Err(ControlError::InvalidRequest(
+                "Unexpected response".to_string(),
+            )),
         }
     }
 
@@ -447,7 +452,9 @@ impl ControlClient {
         match response.data {
             ResponseData::Status(status) => Ok(status),
             ResponseData::Error { message } => Err(ControlError::Internal(message)),
-            _ => Err(ControlError::InvalidRequest("Unexpected response".to_string())),
+            _ => Err(ControlError::InvalidRequest(
+                "Unexpected response".to_string(),
+            )),
         }
     }
 }
@@ -461,19 +468,19 @@ mod tests {
     async fn test_server_start_stop() {
         let temp_dir = tempdir().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
-        
+
         let server_config = ServerConfig {
             socket_path: socket_path.clone(),
             ..Default::default()
         };
-        
+
         let mut server = ControlServer::new(server_config, Config::default());
-        
+
         server.start().await.unwrap();
         assert!(server.is_running());
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        
+
         server.stop().await.unwrap();
         assert!(!server.is_running());
     }
@@ -482,26 +489,26 @@ mod tests {
     async fn test_client_server_communication() {
         let temp_dir = tempdir().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
-        
+
         let server_config = ServerConfig {
             socket_path: socket_path.clone(),
             ..Default::default()
         };
-        
+
         let mut server = ControlServer::new(server_config, Config::default());
         server.start().await.unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
+
         let mut client = ControlClient::new(&socket_path);
         let health = client.health().await.unwrap();
-        
+
         assert!(!health.running);
         assert_eq!(health.api_version, API_VERSION);
-        
+
         let status = client.status().await.unwrap();
         assert_eq!(status.state, EngineState::Stopped);
-        
+
         server.stop().await.unwrap();
     }
 
@@ -509,26 +516,26 @@ mod tests {
     async fn test_ping_pong() {
         let temp_dir = tempdir().unwrap();
         let socket_path = temp_dir.path().join("test.sock");
-        
+
         let server_config = ServerConfig {
             socket_path: socket_path.clone(),
             ..Default::default()
         };
-        
+
         let mut server = ControlServer::new(server_config, Config::default());
         server.start().await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
+
         let mut client = ControlClient::new(&socket_path);
         let response = client.send(Command::Ping).await.unwrap();
-        
+
         assert!(response.success);
         if let ResponseData::Pong { timestamp } = response.data {
             assert!(timestamp > 0);
         } else {
             panic!("Expected Pong response");
         }
-        
+
         server.stop().await.unwrap();
     }
 }

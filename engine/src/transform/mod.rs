@@ -1,9 +1,9 @@
+pub mod decoy;
 pub mod fragment;
+pub mod header;
 pub mod jitter;
 pub mod padding;
-pub mod header;
 pub mod resegment;
-pub mod decoy;
 
 use bytes::BytesMut;
 use serde::{Deserialize, Serialize};
@@ -12,31 +12,31 @@ use crate::config::TransformParams;
 use crate::error::Result;
 use crate::flow::FlowContext;
 
+pub use decoy::DecoyTransform;
 pub use fragment::FragmentTransform;
+pub use header::HeaderNormalizationTransform;
 pub use jitter::JitterTransform;
 pub use padding::PaddingTransform;
-pub use header::HeaderNormalizationTransform;
 pub use resegment::ResegmentTransform;
-pub use decoy::DecoyTransform;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransformResult {
     Continue,
-    Fragmented,    
-    Delay,    
-    Drop,    
-    Skip,    
+    Fragmented,
+    Delay,
+    Drop,
+    Skip,
     Error(String),
 }
 
 pub trait Transform: Send + Sync {
     fn name(&self) -> &'static str;
-    fn apply(&self, ctx: &mut FlowContext<'_>, data: &mut BytesMut) -> Result<TransformResult>;    
+    fn apply(&self, ctx: &mut FlowContext<'_>, data: &mut BytesMut) -> Result<TransformResult>;
     fn is_enabled(&self, params: &TransformParams) -> bool {
         let _ = params;
         true
     }
-    
+
     fn reset(&self) {}
 }
 
@@ -56,14 +56,14 @@ pub fn create_all_transforms(params: &TransformParams) -> Vec<BoxedTransform> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_create_all_transforms() {
         let params = TransformParams::default();
         let transforms = create_all_transforms(&params);
-        
+
         assert_eq!(transforms.len(), 6);
-        
+
         let names: Vec<&str> = transforms.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"fragment"));
         assert!(names.contains(&"resegment"));

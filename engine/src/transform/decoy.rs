@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use tracing::trace;
 
+use super::{Transform, TransformResult};
 use crate::config::{DecoyParams, TransformParams};
 use crate::error::Result;
 use crate::flow::FlowContext;
-use super::{Transform, TransformResult};
 
 pub struct DecoyTransform {
     params: DecoyParams,
@@ -28,9 +28,9 @@ impl DecoyTransform {
         }
 
         let mut decoy = BytesMut::from(original);
-        
+
         decoy[8] = self.params.ttl;
-        
+
         if decoy.len() > 5 {
             decoy[4] ^= 0xFF;
             decoy[5] ^= 0xFF;
@@ -46,7 +46,7 @@ impl DecoyTransform {
         if self.params.probability >= 1.0 {
             return true;
         }
-        
+
         let threshold = (self.params.probability * 1000.0) as u64;
         (seed % 1000) < threshold
     }
@@ -62,7 +62,9 @@ impl Transform for DecoyTransform {
             return Ok(TransformResult::Continue);
         }
 
-        let seed = ctx.state.packet_count
+        let seed = ctx
+            .state
+            .packet_count
             .wrapping_mul(0x1337CAFE)
             .wrapping_add(data.len() as u64);
 
@@ -96,17 +98,16 @@ impl Transform for DecoyTransform {
     }
 
     fn is_enabled(&self, params: &TransformParams) -> bool {
-        params.decoy.probability > 0.0 
-            && (params.decoy.send_before || params.decoy.send_after)
+        params.decoy.probability > 0.0 && (params.decoy.send_before || params.decoy.send_after)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
     use crate::config::Protocol;
     use crate::flow::{FlowKey, FlowState};
+    use std::net::{IpAddr, Ipv4Addr};
 
     fn test_flow_key() -> FlowKey {
         FlowKey::new(
@@ -121,16 +122,9 @@ mod tests {
     fn create_ipv4_packet() -> BytesMut {
         let mut packet = BytesMut::with_capacity(40);
         packet.extend_from_slice(&[
-            0x45, 0x00, 0x00, 0x28,
-            0x12, 0x34, 0x00, 0x00,
-            0x40, 0x06, 0x00, 0x00,
-            192, 168, 1, 1,
-            8, 8, 8, 8,
-            0x30, 0x39, 0x01, 0xBB,
-            0x00, 0x00, 0x00, 0x01,
-            0x00, 0x00, 0x00, 0x00,
-            0x50, 0x02, 0x72, 0x10,
-            0x00, 0x00, 0x00, 0x00,
+            0x45, 0x00, 0x00, 0x28, 0x12, 0x34, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 192, 168, 1, 1,
+            8, 8, 8, 8, 0x30, 0x39, 0x01, 0xBB, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+            0x50, 0x02, 0x72, 0x10, 0x00, 0x00, 0x00, 0x00,
         ]);
         packet
     }
@@ -144,7 +138,7 @@ mod tests {
             probability: 1.0,
         };
         let transform = DecoyTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -164,7 +158,7 @@ mod tests {
             probability: 0.0,
         };
         let transform = DecoyTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -184,7 +178,7 @@ mod tests {
             probability: 1.0,
         };
         let transform = DecoyTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -194,11 +188,9 @@ mod tests {
         let result = transform.apply(&mut ctx, &mut data).unwrap();
         assert_eq!(result, TransformResult::Fragmented);
         assert_eq!(ctx.output_packets.len(), 1);
-        
-        
+
         assert_eq!(data[8], 0x40);
-        
-        
+
         assert_eq!(ctx.output_packets[0][8], 3);
     }
 
@@ -211,7 +203,7 @@ mod tests {
             probability: 1.0,
         };
         let transform = DecoyTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);
@@ -220,11 +212,9 @@ mod tests {
         let result = transform.apply(&mut ctx, &mut data).unwrap();
         assert_eq!(result, TransformResult::Fragmented);
         assert_eq!(ctx.output_packets.len(), 1);
-        
-        
+
         assert_eq!(data[8], 2);
-        
-        
+
         assert_eq!(ctx.output_packets[0][8], 0x40);
     }
 
@@ -241,10 +231,8 @@ mod tests {
         let original = create_ipv4_packet();
         let decoy = transform.create_decoy(&original).unwrap();
 
-        
         assert_eq!(decoy[8], 1);
-        
-        
+
         assert_ne!(decoy[4], original[4]);
         assert_ne!(decoy[5], original[5]);
     }
@@ -258,7 +246,7 @@ mod tests {
             probability: 1.0,
         };
         let transform = DecoyTransform::new(&params);
-        
+
         let key = test_flow_key();
         let mut state = FlowState::new(key);
         let mut ctx = FlowContext::new(&key, &mut state, None);

@@ -1,22 +1,22 @@
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::net::IpAddr;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
-use engine::{FlowKey, Pipeline, Stats};
 use engine::config::Protocol;
+use engine::{FlowKey, Pipeline, Stats};
 
 use crate::error::{BackendError, Result};
 use crate::traits::{Backend, BackendConfig, BackendHandle, BackendSettings, TunSettings};
 
 pub struct TunBackend {
-    running: Arc<AtomicBool>,    
-    shutdown_tx: Option<mpsc::Sender<()>>,    
-    config: Option<TunSettings>,    
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<mpsc::Sender<()>>,
+    config: Option<TunSettings>,
     task_handle: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -55,7 +55,6 @@ impl TunBackend {
 
         let (src_port, dst_port, proto) = match protocol {
             6 => {
-                
                 if data.len() < ihl + 4 {
                     return None;
                 }
@@ -64,7 +63,6 @@ impl TunBackend {
                 (src_port, dst_port, Protocol::Tcp)
             }
             17 => {
-                
                 if data.len() < ihl + 4 {
                     return None;
                 }
@@ -72,10 +70,7 @@ impl TunBackend {
                 let dst_port = u16::from_be_bytes([data[ihl + 2], data[ihl + 3]]);
                 (src_port, dst_port, Protocol::Udp)
             }
-            1 => {
-                
-                (0, 0, Protocol::Icmp)
-            }
+            1 => (0, 0, Protocol::Icmp),
             _ => {
                 return None;
             }
@@ -104,9 +99,11 @@ impl Backend for TunBackend {
 
         let tun_settings = match config.backend_settings {
             BackendSettings::Tun(settings) => settings,
-            _ => return Err(BackendError::NotSupported(
-                "TunBackend requires TunSettings".to_string()
-            )),
+            _ => {
+                return Err(BackendError::NotSupported(
+                    "TunBackend requires TunSettings".to_string(),
+                ))
+            }
         };
 
         info!(
@@ -118,7 +115,7 @@ impl Backend for TunBackend {
         let stats = Arc::new(Stats::new());
         let pipeline = Arc::new(
             Pipeline::new(config.engine_config, stats.clone())
-                .map_err(|e| BackendError::Engine(e))?
+                .map_err(|e| BackendError::Engine(e))?,
         );
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -133,10 +130,8 @@ impl Backend for TunBackend {
 
         let handle = tokio::spawn(async move {
             info!("TUN backend task started");
-            let mut cleanup_interval = tokio::time::interval(
-                std::time::Duration::from_secs(30)
-            );
-            
+            let mut cleanup_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
@@ -178,10 +173,7 @@ impl Backend for TunBackend {
 
         let handle = self.task_handle.lock().take();
         if let Some(handle) = handle {
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                handle,
-            ).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
         }
 
         self.running.store(false, Ordering::SeqCst);
@@ -208,10 +200,14 @@ pub struct MockTunDevice {
 
 #[cfg(test)]
 impl MockTunDevice {
-    pub fn new() -> (Self, mpsc::Sender<bytes::BytesMut>, mpsc::Receiver<bytes::BytesMut>) {
+    pub fn new() -> (
+        Self,
+        mpsc::Sender<bytes::BytesMut>,
+        mpsc::Receiver<bytes::BytesMut>,
+    ) {
         let (read_tx, read_rx) = mpsc::channel(100);
         let (write_tx, write_rx) = mpsc::channel(100);
-        
+
         (
             Self {
                 read_queue: read_rx,
@@ -227,7 +223,9 @@ impl MockTunDevice {
     }
 
     pub async fn write(&self, data: bytes::BytesMut) -> Result<()> {
-        self.write_queue.send(data).await
+        self.write_queue
+            .send(data)
+            .await
             .map_err(|_| BackendError::QueueFull("write queue".to_string()))
     }
 }
@@ -240,28 +238,17 @@ mod tests {
 
     fn create_ipv4_tcp_packet() -> BytesMut {
         let mut packet = BytesMut::with_capacity(60);
-        
-        
+
         packet.extend_from_slice(&[
-            0x45, 0x00, 0x00, 0x3C, 
-            0x00, 0x00, 0x00, 0x00, 
-            0x40, 0x06, 0x00, 0x00, 
-            192, 168, 1, 1,         
-            8, 8, 8, 8,             
+            0x45, 0x00, 0x00, 0x3C, 0x00, 0x00, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 192, 168, 1, 1,
+            8, 8, 8, 8,
         ]);
-        
-        
+
         packet.extend_from_slice(&[
-            0x30, 0x39,             
-            0x01, 0xBB,             
-            0x00, 0x00, 0x00, 0x00, 
-            0x00, 0x00, 0x00, 0x00, 
-            0x50, 0x02,             
-            0x00, 0x00,             
-            0x00, 0x00,             
-            0x00, 0x00,             
+            0x30, 0x39, 0x01, 0xBB, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x50, 0x02,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]);
-        
+
         packet
     }
 
@@ -269,10 +256,10 @@ mod tests {
     fn test_parse_ipv4_flow_key() {
         let packet = create_ipv4_tcp_packet();
         let key = TunBackend::parse_ipv4_flow_key(&packet);
-        
+
         assert!(key.is_some());
         let key = key.unwrap();
-        
+
         assert_eq!(key.src_port, 12345);
         assert_eq!(key.dst_port, 443);
         assert!(matches!(key.protocol, Protocol::Tcp));
@@ -294,18 +281,18 @@ mod tests {
     #[tokio::test]
     async fn test_backend_start_stop() {
         let mut backend = TunBackend::new();
-        
+
         let config = BackendConfig {
             engine_config: Config::default(),
             max_queue_size: 100,
             backend_settings: BackendSettings::Tun(TunSettings::default()),
         };
-        
+
         let handle = backend.start(config).await.unwrap();
         assert!(backend.is_running());
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        
+
         backend.stop().await.unwrap();
         assert!(!backend.is_running());
     }
@@ -313,18 +300,18 @@ mod tests {
     #[tokio::test]
     async fn test_backend_double_start() {
         let mut backend = TunBackend::new();
-        
+
         let config = BackendConfig {
             engine_config: Config::default(),
             max_queue_size: 100,
             backend_settings: BackendSettings::Tun(TunSettings::default()),
         };
-        
+
         let _handle = backend.start(config.clone()).await.unwrap();
-        
+
         let result = backend.start(config).await;
         assert!(matches!(result, Err(BackendError::AlreadyRunning)));
-        
+
         backend.stop().await.unwrap();
     }
 

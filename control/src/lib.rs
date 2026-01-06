@@ -3,5 +3,5 @@ pub mod messages;
 pub mod server;
 
 pub use error::{ControlError, Result};
-pub use messages::{Request, Response, ResponseData, Command, Status};
-pub use server::{ControlServer, ControlClient, ServerConfig};
+pub use messages::{Command, Request, Response, ResponseData, Status};
+pub use server::{ControlClient, ControlServer, ServerConfig};

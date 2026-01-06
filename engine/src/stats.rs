@@ -1,19 +1,19 @@
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Default)]
 pub struct Stats {
     pub packets_in: AtomicU64,
-    pub packets_out: AtomicU64,    
+    pub packets_out: AtomicU64,
     pub bytes_in: AtomicU64,
-    pub bytes_out: AtomicU64,    
-    pub packets_dropped: AtomicU64,    
-    pub packets_matched: AtomicU64,    
-    pub packets_transformed: AtomicU64,    
-    pub transform_errors: AtomicU64,    
-    pub active_flows: AtomicU64,    
-    pub flows_created: AtomicU64,    
-    pub flows_evicted: AtomicU64,    
+    pub bytes_out: AtomicU64,
+    pub packets_dropped: AtomicU64,
+    pub packets_matched: AtomicU64,
+    pub packets_transformed: AtomicU64,
+    pub transform_errors: AtomicU64,
+    pub active_flows: AtomicU64,
+    pub flows_created: AtomicU64,
+    pub flows_evicted: AtomicU64,
     pub queue_overflows: AtomicU64,
     pub fragments_generated: AtomicU64,
     pub total_jitter_ms: AtomicU64,
@@ -66,7 +66,8 @@ impl Stats {
     }
 
     pub fn record_fragments(&self, count: u32) {
-        self.fragments_generated.fetch_add(count as u64, Ordering::Relaxed);
+        self.fragments_generated
+            .fetch_add(count as u64, Ordering::Relaxed);
     }
 
     pub fn record_jitter(&self, ms: u64) {
@@ -188,13 +189,13 @@ mod tests {
     #[test]
     fn test_stats_recording() {
         let stats = Stats::new();
-        
+
         stats.record_packet_in(100);
         stats.record_packet_in(200);
         stats.record_packet_out(50);
         stats.record_packet_out(50);
         stats.record_packet_out(50);
-        
+
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.packets_in, 2);
         assert_eq!(snapshot.packets_out, 3);
@@ -205,12 +206,12 @@ mod tests {
     #[test]
     fn test_stats_flow_tracking() {
         let stats = Stats::new();
-        
+
         stats.record_flow_created();
         stats.record_flow_created();
         stats.record_flow_created();
         stats.record_flow_evicted();
-        
+
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.flows_created, 3);
         assert_eq!(snapshot.active_flows, 2);
@@ -220,13 +221,13 @@ mod tests {
     #[test]
     fn test_stats_reset() {
         let stats = Stats::new();
-        
+
         stats.record_packet_in(100);
         stats.record_flow_created();
         stats.record_fragments(10);
-        
+
         stats.reset();
-        
+
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.packets_in, 0);
         assert_eq!(snapshot.flows_created, 0);
@@ -252,7 +253,7 @@ mod tests {
             total_jitter_ms: 1000,
             decoys_sent: 20,
         };
-        
+
         assert_eq!(snapshot.expansion_ratio(), 1.5);
         assert_eq!(snapshot.transform_ratio(), 0.75);
         assert_eq!(snapshot.drop_ratio(), 0.05);
@@ -279,7 +280,7 @@ mod tests {
             total_jitter_ms: 0,
             decoys_sent: 0,
         };
-        
+
         assert_eq!(empty.expansion_ratio(), 0.0);
         assert_eq!(empty.transform_ratio(), 0.0);
         assert_eq!(empty.drop_ratio(), 0.0);
