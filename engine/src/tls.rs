@@ -16,7 +16,7 @@ pub const EXT_SIGNATURE_ALGORITHMS: u16 = 0x000d;
 
 pub const SNI_HOST_NAME: u8 = 0x00;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ClientHelloInfo {
     pub record_offset: usize,
     pub record_length: usize,
@@ -26,21 +26,6 @@ pub struct ClientHelloInfo {
     pub record_version: (u8, u8),
     pub client_version: (u8, u8),
     pub is_valid: bool,
-}
-
-impl Default for ClientHelloInfo {
-    fn default() -> Self {
-        Self {
-            record_offset: 0,
-            record_length: 0,
-            sni_offset: None,
-            sni_length: None,
-            sni_hostname: None,
-            record_version: (0, 0),
-            client_version: (0, 0),
-            is_valid: false,
-        }
-    }
 }
 
 impl ClientHelloInfo {
@@ -92,8 +77,6 @@ pub fn parse_client_hello(data: &[u8]) -> Option<ClientHelloInfo> {
     let record_length = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
     pos += 2;
     info.record_length = record_length + 5;
-
-    if data.len() < pos + record_length {}
 
     if pos >= data.len() {
         return None;

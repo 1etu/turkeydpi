@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{EngineError, Result};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub global: GlobalConfig,
@@ -20,23 +20,12 @@ pub struct Config {
     pub transforms: TransformParams,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            global: GlobalConfig::default(),
-            rules: Vec::new(),
-            limits: Limits::default(),
-            transforms: TransformParams::default(),
-        }
-    }
-}
-
 impl Config {
     pub fn load_from_file(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
 
-        let config: Config = if path.extension().map_or(false, |e| e == "toml") {
+        let config: Config = if path.extension().is_some_and(|e| e == "toml") {
             toml::from_str(&content)?
         } else {
             serde_json::from_str(&content)?
@@ -276,7 +265,7 @@ pub enum TransformType {
     Reorder,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TransformParams {
     pub fragment: FragmentParams,
@@ -290,19 +279,6 @@ pub struct TransformParams {
     pub header: HeaderParams,
 
     pub decoy: DecoyParams,
-}
-
-impl Default for TransformParams {
-    fn default() -> Self {
-        Self {
-            fragment: FragmentParams::default(),
-            resegment: ResegmentParams::default(),
-            padding: PaddingParams::default(),
-            jitter: JitterParams::default(),
-            header: HeaderParams::default(),
-            decoy: DecoyParams::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

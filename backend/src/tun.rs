@@ -114,8 +114,7 @@ impl Backend for TunBackend {
 
         let stats = Arc::new(Stats::new());
         let pipeline = Arc::new(
-            Pipeline::new(config.engine_config, stats.clone())
-                .map_err(|e| BackendError::Engine(e))?,
+            Pipeline::new(config.engine_config, stats.clone()).map_err(BackendError::Engine)?,
         );
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -288,7 +287,7 @@ mod tests {
             backend_settings: BackendSettings::Tun(TunSettings::default()),
         };
 
-        let handle = backend.start(config).await.unwrap();
+        let _handle = backend.start(config).await.unwrap();
         assert!(backend.is_running());
 
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;

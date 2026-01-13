@@ -313,8 +313,7 @@ impl Backend for ProxyBackend {
 
         let stats = Arc::new(Stats::new());
         let pipeline = Arc::new(
-            Pipeline::new(config.engine_config, stats.clone())
-                .map_err(|e| BackendError::Engine(e))?,
+            Pipeline::new(config.engine_config, stats.clone()).map_err(BackendError::Engine)?,
         );
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
@@ -444,7 +443,7 @@ mod tests {
             }),
         };
 
-        let handle = backend.start(config).await.unwrap();
+        let _handle = backend.start(config).await.unwrap();
         assert!(backend.is_running());
 
         backend.stop().await.unwrap();

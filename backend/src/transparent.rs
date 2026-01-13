@@ -467,8 +467,7 @@ fn extract_http_target(request: &str) -> Option<String> {
         return None;
     }
 
-    if url.starts_with("http://") {
-        let without_scheme = &url[7..];
+    if let Some(without_scheme) = url.strip_prefix("http://") {
         let host_end = without_scheme.find('/').unwrap_or(without_scheme.len());
         let host_port = &without_scheme[..host_end];
 
@@ -629,8 +628,7 @@ fn rewrite_http_request(request: &str, raw: &[u8]) -> Vec<u8> {
     let url = parts[1];
     let version = parts[2];
 
-    let path = if url.starts_with("http://") {
-        let without_scheme = &url[7..];
+    let path = if let Some(without_scheme) = url.strip_prefix("http://") {
         if let Some(slash_pos) = without_scheme.find('/') {
             &without_scheme[slash_pos..]
         } else {

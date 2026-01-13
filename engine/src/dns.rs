@@ -112,15 +112,14 @@ impl DohResolver {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
 
         let connector = tokio_native_tls::TlsConnector::from(
-            native_tls::TlsConnector::new()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+            native_tls::TlsConnector::new().map_err(std::io::Error::other)?,
         );
 
         let mut tls_stream =
             tokio::time::timeout(Duration::from_secs(5), connector.connect(server, stream))
                 .await
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "TLS timeout"))?
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
 
         let request = format!(
             "GET {}?name={}&type=A HTTP/1.1\r\n\
