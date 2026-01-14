@@ -140,7 +140,7 @@ impl DohResolver {
     }
 
     fn parse_doh_response(&self, response: &str) -> std::io::Result<Vec<IpAddr>> {
-        let body = response.split("\r\n\r\n").nth(1).unwrap_or("");
+        let body = split_http_body(response);
 
         let mut ips = Vec::new();
 
@@ -157,6 +157,16 @@ impl DohResolver {
         }
 
         Ok(ips)
+    }
+}
+
+fn split_http_body(response: &str) -> &str {
+    if let Some(pos) = response.find("\r\n\r\n") {
+        &response[pos + 4..]
+    } else if let Some(pos) = response.find("\n\n") {
+        &response[pos + 2..]
+    } else {
+        ""
     }
 }
 
