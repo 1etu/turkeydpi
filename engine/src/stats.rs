@@ -17,7 +17,6 @@ pub struct Stats {
     pub queue_overflows: AtomicU64,
     pub fragments_generated: AtomicU64,
     pub total_jitter_ms: AtomicU64,
-    pub decoys_sent: AtomicU64,
 }
 
 impl Stats {
@@ -74,10 +73,6 @@ impl Stats {
         self.total_jitter_ms.fetch_add(ms, Ordering::Relaxed);
     }
 
-    pub fn record_decoys(&self, count: u32) {
-        self.decoys_sent.fetch_add(count as u64, Ordering::Relaxed);
-    }
-
     pub fn set_active_flows(&self, count: usize) {
         self.active_flows.store(count as u64, Ordering::Relaxed);
     }
@@ -98,7 +93,6 @@ impl Stats {
             queue_overflows: self.queue_overflows.load(Ordering::Relaxed),
             fragments_generated: self.fragments_generated.load(Ordering::Relaxed),
             total_jitter_ms: self.total_jitter_ms.load(Ordering::Relaxed),
-            decoys_sent: self.decoys_sent.load(Ordering::Relaxed),
         }
     }
 
@@ -117,7 +111,6 @@ impl Stats {
         self.queue_overflows.store(0, Ordering::Relaxed);
         self.fragments_generated.store(0, Ordering::Relaxed);
         self.total_jitter_ms.store(0, Ordering::Relaxed);
-        self.decoys_sent.store(0, Ordering::Relaxed);
     }
 }
 
@@ -137,7 +130,6 @@ pub struct StatsSnapshot {
     pub queue_overflows: u64,
     pub fragments_generated: u64,
     pub total_jitter_ms: u64,
-    pub decoys_sent: u64,
 }
 
 impl StatsSnapshot {
@@ -251,7 +243,6 @@ mod tests {
             queue_overflows: 0,
             fragments_generated: 50,
             total_jitter_ms: 1000,
-            decoys_sent: 20,
         };
 
         assert_eq!(snapshot.expansion_ratio(), 1.5);
@@ -278,7 +269,6 @@ mod tests {
             queue_overflows: 0,
             fragments_generated: 0,
             total_jitter_ms: 0,
-            decoys_sent: 0,
         };
 
         assert_eq!(empty.expansion_ratio(), 0.0);

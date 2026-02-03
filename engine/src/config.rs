@@ -87,13 +87,6 @@ impl Config {
             ));
         }
 
-        if self.transforms.padding.max_bytes > 1500 {
-            return Err(EngineError::validation(
-                "transforms.padding.max_bytes",
-                "exceeds MTU (1500 bytes)",
-            ));
-        }
-
         for (i, rule) in self.rules.iter().enumerate() {
             rule.validate()
                 .map_err(|e| EngineError::validation(format!("rules[{}]", i), e.to_string()))?;
@@ -121,10 +114,6 @@ pub struct GlobalConfig {
 
     pub enable_jitter: bool,
 
-    pub enable_padding: bool,
-
-    pub enable_header_normalization: bool,
-
     pub log_level: String,
 
     pub json_logging: bool,
@@ -136,8 +125,6 @@ impl Default for GlobalConfig {
             enabled: true,
             enable_fragmentation: true,
             enable_jitter: false,
-            enable_padding: true,
-            enable_header_normalization: true,
             log_level: "info".to_string(),
             json_logging: false,
         }
@@ -254,15 +241,7 @@ pub enum TransformType {
 
     Resegment,
 
-    Padding,
-
     Jitter,
-
-    HeaderNormalization,
-
-    Decoy,
-
-    Reorder,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -272,13 +251,7 @@ pub struct TransformParams {
 
     pub resegment: ResegmentParams,
 
-    pub padding: PaddingParams,
-
     pub jitter: JitterParams,
-
-    pub header: HeaderParams,
-
-    pub decoy: DecoyParams,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,26 +296,6 @@ impl Default for ResegmentParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PaddingParams {
-    pub min_bytes: usize,
-
-    pub max_bytes: usize,
-
-    pub fill_byte: Option<u8>,
-}
-
-impl Default for PaddingParams {
-    fn default() -> Self {
-        Self {
-            min_bytes: 0,
-            max_bytes: 64,
-            fill_byte: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
 pub struct JitterParams {
     pub min_ms: u64,
 
@@ -364,52 +317,6 @@ impl JitterParams {
             Duration::from_millis(self.min_ms),
             Duration::from_millis(self.max_ms),
         )
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct HeaderParams {
-    pub normalize_ttl: bool,
-
-    pub ttl_value: u8,
-
-    pub normalize_window: bool,
-
-    pub randomize_ip_id: bool,
-}
-
-impl Default for HeaderParams {
-    fn default() -> Self {
-        Self {
-            normalize_ttl: false,
-            ttl_value: 64,
-            normalize_window: false,
-            randomize_ip_id: true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DecoyParams {
-    pub send_before: bool,
-
-    pub send_after: bool,
-
-    pub ttl: u8,
-
-    pub probability: f32,
-}
-
-impl Default for DecoyParams {
-    fn default() -> Self {
-        Self {
-            send_before: false,
-            send_after: false,
-            ttl: 1,
-            probability: 0.0,
-        }
     }
 }
 
@@ -486,7 +393,7 @@ mod tests {
                 protocols: Some(vec![Protocol::Tcp]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Fragment, TransformType::Padding],
+            transforms: vec![TransformType::Fragment, TransformType::Resegment],
             overrides: HashMap::new(),
         };
         assert!(rule.validate().is_ok());
@@ -507,7 +414,7 @@ mod tests {
                         "dst_ports": [443],
                         "protocols": ["tcp"]
                     },
-                    "transforms": ["fragment", "padding"]
+                    "transforms": ["fragment", "resegment"]
                 }
             ],
             "limits": {
@@ -531,7 +438,7 @@ mod tests {
 
         [[rules]]
         name = "https-evasion"
-        transforms = ["fragment", "padding"]
+        transforms = ["fragment", "resegment"]
 
         [rules.match_criteria]
         dst_ports = [443]

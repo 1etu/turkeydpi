@@ -16,8 +16,6 @@ fn test_config_with_fragmentation() -> Config {
             enabled: true,
             enable_fragmentation: true,
             enable_jitter: false,
-            enable_padding: false,
-            enable_header_normalization: false,
             log_level: "debug".to_string(),
             json_logging: false,
         },
@@ -52,8 +50,6 @@ fn test_config_multi_transform() -> Config {
             enabled: true,
             enable_fragmentation: true,
             enable_jitter: false,
-            enable_padding: true,
-            enable_header_normalization: false,
             log_level: "debug".to_string(),
             json_logging: false,
         },
@@ -66,7 +62,7 @@ fn test_config_multi_transform() -> Config {
                 protocols: Some(vec![Protocol::Tcp]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Fragment, TransformType::Padding],
+            transforms: vec![TransformType::Fragment, TransformType::Resegment],
             overrides: HashMap::new(),
         }],
         limits: Limits::default(),
@@ -77,10 +73,9 @@ fn test_config_multi_transform() -> Config {
                 split_at_offset: None,
                 randomize: false,
             },
-            padding: PaddingParams {
-                min_bytes: 10,
-                max_bytes: 10,
-                fill_byte: Some(0xAA),
+            resegment: ResegmentParams {
+                segment_size: 8,
+                max_segments: 32,
             },
             ..Default::default()
         },
@@ -180,22 +175,18 @@ fn test_pipeline_multi_transform() {
     let pipeline = Pipeline::new(config, stats).unwrap();
 
     let key = https_flow_key();
-    let data = BytesMut::from(&b"Hello, this is a test message for multi-transform"[..]);
-    let original_len = data.len();
+    let original = b"Hello, this is a test message for multi-transform";
+    let data = BytesMut::from(&original[..]);
 
     let output = pipeline.process(key, data).unwrap();
 
     assert!(output.matched_rule.is_some());
 
     let all_packets = output.all_packets();
+    assert!(all_packets.len() > 1);
 
-    let total_len: usize = all_packets.iter().map(|p| p.len()).sum();
-    assert!(
-        total_len > original_len,
-        "Expected padding to increase size: {} > {}",
-        total_len,
-        original_len
-    );
+    let reassembled: Vec<u8> = all_packets.iter().flat_map(|p| p.iter().copied()).collect();
+    assert_eq!(reassembled.as_slice(), original);
 }
 
 #[test]
@@ -275,8 +266,6 @@ fn test_multiple_rules_priority() {
             enabled: true,
             enable_fragmentation: true,
             enable_jitter: false,
-            enable_padding: true,
-            enable_header_normalization: false,
             log_level: "debug".to_string(),
             json_logging: false,
         },
@@ -286,7 +275,7 @@ fn test_multiple_rules_priority() {
                 enabled: true,
                 priority: 0,
                 match_criteria: MatchCriteria::default(),
-                transforms: vec![TransformType::Padding],
+                transforms: vec![TransformType::Resegment],
                 overrides: HashMap::new(),
             },
             Rule {
@@ -327,8 +316,6 @@ fn test_ip_cidr_matching() {
             enabled: true,
             enable_fragmentation: false,
             enable_jitter: false,
-            enable_padding: true,
-            enable_header_normalization: false,
             log_level: "debug".to_string(),
             json_logging: false,
         },
@@ -344,7 +331,7 @@ fn test_ip_cidr_matching() {
                 ]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Padding],
+            transforms: vec![TransformType::Resegment],
             overrides: HashMap::new(),
         }],
         limits: Limits::default(),

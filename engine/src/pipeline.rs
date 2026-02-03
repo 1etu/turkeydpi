@@ -12,8 +12,7 @@ use crate::error::{EngineError, Result};
 use crate::flow::{FlowCache, FlowContext, FlowKey};
 use crate::stats::Stats;
 use crate::transform::{
-    BoxedTransform, DecoyTransform, FragmentTransform, HeaderNormalizationTransform,
-    JitterTransform, PaddingTransform, ResegmentTransform, TransformResult,
+    BoxedTransform, FragmentTransform, JitterTransform, ResegmentTransform, TransformResult,
 };
 
 #[derive(Debug)]
@@ -172,20 +171,8 @@ impl Pipeline {
             Box::new(ResegmentTransform::new(&params.resegment)),
         );
         transforms.insert(
-            TransformType::Padding,
-            Box::new(PaddingTransform::new(&params.padding)),
-        );
-        transforms.insert(
             TransformType::Jitter,
             Box::new(JitterTransform::new(&params.jitter)),
-        );
-        transforms.insert(
-            TransformType::HeaderNormalization,
-            Box::new(HeaderNormalizationTransform::new(&params.header)),
-        );
-        transforms.insert(
-            TransformType::Decoy,
-            Box::new(DecoyTransform::new(&params.decoy)),
         );
 
         transforms
@@ -288,9 +275,7 @@ impl Pipeline {
             let enabled = match transform_type {
                 TransformType::Fragment => config.global.enable_fragmentation,
                 TransformType::Jitter => config.global.enable_jitter,
-                TransformType::Padding => config.global.enable_padding,
-                TransformType::HeaderNormalization => config.global.enable_header_normalization,
-                _ => true,
+                TransformType::Resegment => true,
             };
 
             if !enabled {
@@ -416,7 +401,7 @@ mod tests {
                 protocols: Some(vec![Protocol::Tcp]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Fragment, TransformType::Padding],
+            transforms: vec![TransformType::Fragment, TransformType::Resegment],
             overrides: HashMap::new(),
         });
         config
@@ -544,7 +529,7 @@ mod tests {
                 dst_ports: Some(vec![8080]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Padding],
+            transforms: vec![TransformType::Resegment],
             overrides: HashMap::new(),
         });
 
@@ -571,7 +556,7 @@ mod tests {
             enabled: true,
             priority: 0,
             match_criteria: MatchCriteria::default(),
-            transforms: vec![TransformType::Padding],
+            transforms: vec![TransformType::Resegment],
             overrides: HashMap::new(),
         });
 
@@ -607,7 +592,7 @@ mod tests {
                 dst_ip: Some(vec!["8.8.8.0/24".to_string()]),
                 ..Default::default()
             },
-            transforms: vec![TransformType::Padding],
+            transforms: vec![TransformType::Resegment],
             overrides: HashMap::new(),
         });
 

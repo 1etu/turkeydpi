@@ -1,8 +1,5 @@
-pub mod decoy;
 pub mod fragment;
-pub mod header;
 pub mod jitter;
-pub mod padding;
 pub mod resegment;
 
 use bytes::BytesMut;
@@ -12,11 +9,8 @@ use crate::config::TransformParams;
 use crate::error::Result;
 use crate::flow::FlowContext;
 
-pub use decoy::DecoyTransform;
 pub use fragment::FragmentTransform;
-pub use header::HeaderNormalizationTransform;
 pub use jitter::JitterTransform;
-pub use padding::PaddingTransform;
 pub use resegment::ResegmentTransform;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,10 +40,7 @@ pub fn create_all_transforms(params: &TransformParams) -> Vec<BoxedTransform> {
     vec![
         Box::new(FragmentTransform::new(&params.fragment)),
         Box::new(ResegmentTransform::new(&params.resegment)),
-        Box::new(PaddingTransform::new(&params.padding)),
         Box::new(JitterTransform::new(&params.jitter)),
-        Box::new(HeaderNormalizationTransform::new(&params.header)),
-        Box::new(DecoyTransform::new(&params.decoy)),
     ]
 }
 
@@ -62,14 +53,11 @@ mod tests {
         let params = TransformParams::default();
         let transforms = create_all_transforms(&params);
 
-        assert_eq!(transforms.len(), 6);
+        assert_eq!(transforms.len(), 3);
 
         let names: Vec<&str> = transforms.iter().map(|t| t.name()).collect();
         assert!(names.contains(&"fragment"));
         assert!(names.contains(&"resegment"));
-        assert!(names.contains(&"padding"));
         assert!(names.contains(&"jitter"));
-        assert!(names.contains(&"header_normalization"));
-        assert!(names.contains(&"decoy"));
     }
 }

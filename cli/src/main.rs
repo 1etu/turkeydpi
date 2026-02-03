@@ -309,7 +309,6 @@ async fn main() -> Result<()> {
                 println!("  Flows evicted:    {}", stats.flows_evicted);
                 println!("  Fragments gen:    {}", stats.fragments_generated);
                 println!("  Total jitter:     {}ms", stats.total_jitter_ms);
-                println!("  Decoys sent:      {}", stats.decoys_sent);
             }
         }
 
@@ -383,8 +382,6 @@ fn create_example_config() -> Config {
             enabled: true,
             enable_fragmentation: true,
             enable_jitter: false,
-            enable_padding: true,
-            enable_header_normalization: true,
             log_level: "info".to_string(),
             json_logging: false,
         },
@@ -398,19 +395,19 @@ fn create_example_config() -> Config {
                     protocols: Some(vec![Protocol::Tcp]),
                     ..Default::default()
                 },
-                transforms: vec![TransformType::Fragment, TransformType::Padding],
+                transforms: vec![TransformType::Fragment],
                 overrides: HashMap::new(),
             },
             Rule {
-                name: "dns-protection".to_string(),
+                name: "http-evasion".to_string(),
                 enabled: true,
                 priority: 90,
                 match_criteria: MatchCriteria {
-                    dst_ports: Some(vec![53]),
-                    protocols: Some(vec![Protocol::Udp]),
+                    dst_ports: Some(vec![80, 8080]),
+                    protocols: Some(vec![Protocol::Tcp]),
                     ..Default::default()
                 },
-                transforms: vec![TransformType::Padding],
+                transforms: vec![TransformType::Fragment],
                 overrides: HashMap::new(),
             },
         ],
@@ -433,26 +430,9 @@ fn create_example_config() -> Config {
                 segment_size: 16,
                 max_segments: 8,
             },
-            padding: PaddingParams {
-                min_bytes: 0,
-                max_bytes: 64,
-                fill_byte: None,
-            },
             jitter: JitterParams {
                 min_ms: 0,
                 max_ms: 50,
-            },
-            header: HeaderParams {
-                normalize_ttl: false,
-                ttl_value: 64,
-                normalize_window: false,
-                randomize_ip_id: true,
-            },
-            decoy: DecoyParams {
-                send_before: false,
-                send_after: false,
-                ttl: 1,
-                probability: 0.0,
             },
         },
     }
