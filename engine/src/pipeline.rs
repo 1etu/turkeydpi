@@ -270,6 +270,8 @@ impl Pipeline {
         let mut ctx = FlowContext::new(&key, &mut flow_state, Some(rule_ref));
 
         let transforms = self.transforms.read();
+        let original_len = data.len();
+        let mut packets: Vec<BytesMut> = vec![data];
 
         for transform_type in &rule.transforms {
             let enabled = match transform_type {
@@ -296,51 +298,73 @@ impl Pipeline {
                 "applying transform"
             );
 
-            let result = match transform.apply(&mut ctx, &mut data) {
-                Ok(r) => r,
-                Err(e) => {
-                    self.stats.record_transform_error();
-                    warn!(
-                        transform = transform.name(),
-                        error = %e,
-                        "transform error"
-                    );
+            let mut next: Vec<BytesMut> = Vec::with_capacity(packets.len());
+            let mut stop = false;
+
+            for mut packet in packets.drain(..) {
+                if stop {
+                    next.push(packet);
                     continue;
                 }
-            };
 
-            match result {
-                TransformResult::Continue => {}
-                TransformResult::Fragmented => {
-                    self.stats.record_transform();
-                    let fragment_count = ctx.output_packets.len() + 1;
-                    self.stats.record_fragments(fragment_count as u32);
-                }
-                TransformResult::Delay => {
-                    self.stats.record_transform();
-                    if let Some(delay) = ctx.delay {
-                        self.stats.record_jitter(delay.as_millis() as u64);
+                ctx.output_packets.clear();
+
+                let result = match transform.apply(&mut ctx, &mut packet) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        self.stats.record_transform_error();
+                        warn!(
+                            transform = transform.name(),
+                            error = %e,
+                            "transform error"
+                        );
+                        next.push(packet);
+                        continue;
+                    }
+                };
+
+                match result {
+                    TransformResult::Continue => {}
+                    TransformResult::Fragmented => {
+                        self.stats.record_transform();
+                        let fragment_count = ctx.output_packets.len() + 1;
+                        self.stats.record_fragments(fragment_count as u32);
+                    }
+                    TransformResult::Delay => {
+                        self.stats.record_transform();
+                        if let Some(delay) = ctx.delay {
+                            self.stats.record_jitter(delay.as_millis() as u64);
+                        }
+                    }
+                    TransformResult::Drop => {
+                        ctx.mark_drop();
+                        stop = true;
+                        continue;
+                    }
+                    TransformResult::Skip => {
+                        stop = true;
+                    }
+                    TransformResult::Error(msg) => {
+                        self.stats.record_transform_error();
+                        warn!(transform = transform.name(), error = %msg, "transform error");
                     }
                 }
-                TransformResult::Drop => {
-                    ctx.mark_drop();
-                    break;
-                }
-                TransformResult::Skip => {
-                    break;
-                }
-                TransformResult::Error(msg) => {
-                    self.stats.record_transform_error();
-                    warn!(transform = transform.name(), error = %msg, "transform error");
-                }
+
+                next.push(packet);
+                next.append(&mut ctx.output_packets);
+            }
+
+            packets = next;
+
+            if ctx.drop {
+                break;
             }
         }
 
-        ctx.state.update(data.len());
+        ctx.state.update(original_len);
         ctx.state.matched_rule = Some(rule.name.clone());
 
         let should_drop = ctx.drop;
-        let output_packets = std::mem::take(&mut ctx.output_packets);
         let delay = ctx.delay;
 
         drop(transforms);
@@ -353,14 +377,17 @@ impl Pipeline {
             return Ok(PipelineOutput::dropped());
         }
 
-        self.stats.record_packet_out(data.len());
-        for packet in &output_packets {
+        for packet in &packets {
             self.stats.record_packet_out(packet.len());
         }
 
+        let mut iter = packets.into_iter();
+        let primary = iter.next();
+        let additional: Vec<BytesMut> = iter.collect();
+
         Ok(PipelineOutput {
-            primary: Some(data),
-            additional: output_packets,
+            primary,
+            additional,
             delay,
             dropped: false,
             matched_rule: Some(rule.name),
