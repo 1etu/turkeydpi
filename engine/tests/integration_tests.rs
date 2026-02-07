@@ -363,3 +363,72 @@ fn test_ip_cidr_matching() {
     let output = pipeline.process(public_key, data).unwrap();
     assert!(output.matched_rule.is_none());
 }
+
+fn all_transform_config() -> Config {
+    Config {
+        global: GlobalConfig {
+            enabled: true,
+            enable_fragmentation: true,
+            enable_jitter: true,
+            log_level: "debug".to_string(),
+            json_logging: false,
+        },
+        rules: vec![Rule {
+            name: "everything".to_string(),
+            enabled: true,
+            priority: 100,
+            match_criteria: MatchCriteria {
+                dst_ports: Some(vec![443]),
+                protocols: Some(vec![Protocol::Tcp]),
+                ..Default::default()
+            },
+            transforms: vec![
+                TransformType::Fragment,
+                TransformType::Resegment,
+                TransformType::Jitter,
+            ],
+            overrides: HashMap::new(),
+        }],
+        limits: Limits::default(),
+        transforms: TransformParams {
+            fragment: FragmentParams {
+                min_size: 1,
+                max_size: 7,
+                split_at_offset: None,
+                randomize: true,
+            },
+            resegment: ResegmentParams {
+                segment_size: 3,
+                max_segments: 64,
+            },
+            jitter: JitterParams {
+                min_ms: 1,
+                max_ms: 5,
+            },
+        },
+    }
+}
+
+#[test]
+fn test_transforms_preserve_byte_stream() {
+    let stats = Arc::new(Stats::new());
+    let pipeline = Pipeline::new(all_transform_config(), stats).unwrap();
+    let key = https_flow_key();
+
+    for len in 1..400usize {
+        let original: Vec<u8> = (0..len).map(|i| (i * 7 + len) as u8).collect();
+        let output = pipeline
+            .process(key, BytesMut::from(&original[..]))
+            .unwrap();
+
+        assert!(!output.dropped);
+
+        let reassembled: Vec<u8> = output
+            .all_packets()
+            .iter()
+            .flat_map(|p| p.iter().copied())
+            .collect();
+
+        assert_eq!(reassembled, original, "byte stream altered at len {}", len);
+    }
+}
