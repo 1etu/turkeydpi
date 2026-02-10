@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::{EngineError, Result};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub global: GlobalConfig,
 
@@ -106,7 +106,7 @@ impl Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GlobalConfig {
     pub enabled: bool,
 
@@ -132,6 +132,7 @@ impl Default for GlobalConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Rule {
     pub name: String,
 
@@ -173,7 +174,7 @@ impl Rule {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct MatchCriteria {
     pub dst_ip: Option<Vec<String>>,
 
@@ -245,7 +246,7 @@ pub enum TransformType {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct TransformParams {
     pub fragment: FragmentParams,
 
@@ -255,7 +256,7 @@ pub struct TransformParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct FragmentParams {
     pub min_size: usize,
 
@@ -278,7 +279,7 @@ impl Default for FragmentParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ResegmentParams {
     pub segment_size: usize,
 
@@ -295,7 +296,7 @@ impl Default for ResegmentParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct JitterParams {
     pub min_ms: u64,
 
@@ -321,7 +322,7 @@ impl JitterParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_flows: usize,
 
