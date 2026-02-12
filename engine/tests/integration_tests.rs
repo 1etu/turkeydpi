@@ -432,3 +432,24 @@ fn test_transforms_preserve_byte_stream() {
         assert_eq!(reassembled, original, "byte stream altered at len {}", len);
     }
 }
+
+#[test]
+fn test_example_config_parses() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../config.example.toml");
+    let config = Config::load_from_file(path).expect("config.example.toml must load");
+
+    assert!(config.global.enabled);
+    assert!(config.rules.iter().any(|r| r.name == "https-evasion"));
+}
+
+#[test]
+fn test_unknown_config_key_is_rejected() {
+    let toml_str = r#"
+    [transforms.fragment]
+    min_size = 1
+    max_size = 40
+    nonexistent_knob = 7
+    "#;
+
+    assert!(Config::from_toml(toml_str).is_err());
+}
