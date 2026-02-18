@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use engine::{BypassConfig, BypassEngine, DetectedProtocol, DohResolver};
+use engine::{BypassConfig, BypassEngine, BypassResult, DetectedProtocol, DohResolver};
 
 #[derive(Debug, Default)]
 pub struct ProxyStats {
@@ -362,23 +362,34 @@ async fn handle_connect(
         stats.bypass_applied.fetch_add(1, Ordering::Relaxed);
     }
 
+    write_fragments(&mut remote, &result, &stats).await?;
+
+    relay_bidirectional(client, remote, stats, config.buffer_size).await;
+
+    Ok(())
+}
+
+async fn write_fragments(
+    remote: &mut TcpStream,
+    result: &BypassResult,
+    stats: &Arc<ProxyStats>,
+) -> io::Result<()> {
+    let last = result.fragments.len().saturating_sub(1);
+
     for (i, fragment) in result.fragments.iter().enumerate() {
         remote.write_all(fragment).await?;
         stats
             .bytes_sent
             .fetch_add(fragment.len() as u64, Ordering::Relaxed);
 
-        if i < result.fragments.len() - 1 {
+        if i < last {
             if let Some(delay) = result.inter_fragment_delay {
                 sleep(delay).await;
             }
         }
     }
-    remote.flush().await?;
 
-    relay_bidirectional(client, remote, stats, config.buffer_size).await;
-
-    Ok(())
+    remote.flush().await
 }
 
 fn extract_connect_target(request: &str) -> io::Result<String> {
@@ -550,16 +561,25 @@ async fn handle_http_forward(
 
     let rewritten_request = rewrite_http_request(request, raw_request);
 
-    if let Some(host) = extract_host_header(request) {
-        info!("🌐 {} [HTTP forwarded]", host);
+    let _ = remote.set_nodelay(true);
+
+    let engine = BypassEngine::new(config.bypass.clone());
+    let result = engine.process_outgoing(&rewritten_request);
+
+    if let Some(ref host) = result.hostname {
+        if result.modified {
+            info!("🌐 {} [Host fragmented]", host);
+        } else if config.verbose {
+            debug!("🌐 {} [passthrough]", host);
+        }
     }
 
     stats.http_connections.fetch_add(1, Ordering::Relaxed);
+    if result.modified {
+        stats.bypass_applied.fetch_add(1, Ordering::Relaxed);
+    }
 
-    remote.write_all(&rewritten_request).await?;
-    stats
-        .bytes_sent
-        .fetch_add(rewritten_request.len() as u64, Ordering::Relaxed);
+    write_fragments(&mut remote, &result, &stats).await?;
 
     let (mut client_read, mut client_write) = client.into_split();
     let (mut remote_read, mut remote_write) = remote.into_split();
