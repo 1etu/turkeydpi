@@ -214,28 +214,20 @@ async fn handle_client(
     stats: Arc<ProxyStats>,
     dns: Arc<DohResolver>,
 ) -> io::Result<()> {
-    let mut buf = vec![0u8; 4096];
-    let n = client.read(&mut buf).await?;
-    if n == 0 {
-        return Ok(());
-    }
+    let buf = match read_request_head(&mut client).await? {
+        Some(buf) => buf,
+        None => return Ok(()),
+    };
 
-    let request = String::from_utf8_lossy(&buf[..n]);
+    let request = String::from_utf8_lossy(&buf);
 
     if request.starts_with("CONNECT ") {
-        return handle_connect(client, peer_addr, &request, &buf[..n], config, stats, dns).await;
+        return handle_connect(client, peer_addr, &request, &buf, config, stats, dns).await;
     }
 
     if let Some(target) = extract_http_target(&request) {
         return handle_http_forward(
-            client,
-            peer_addr,
-            &request,
-            &buf[..n],
-            target,
-            config,
-            stats,
-            dns,
+            client, peer_addr, &request, &buf, target, config, stats, dns,
         )
         .await;
     }
@@ -367,6 +359,41 @@ async fn handle_connect(
     relay_bidirectional(client, remote, stats, config.buffer_size).await;
 
     Ok(())
+}
+
+const MAX_HEADER_BYTES: usize = 64 * 1024;
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(15);
+
+async fn read_request_head(client: &mut TcpStream) -> io::Result<Option<Vec<u8>>> {
+    let mut buf = Vec::with_capacity(4096);
+    let mut chunk = [0u8; 4096];
+
+    loop {
+        let n = match tokio::time::timeout(HEADER_READ_TIMEOUT, client.read(&mut chunk)).await {
+            Ok(Ok(0)) => {
+                if buf.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(buf));
+            }
+            Ok(Ok(n)) => n,
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(io::Error::new(ErrorKind::TimedOut, "header read timeout")),
+        };
+
+        buf.extend_from_slice(&chunk[..n]);
+
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            return Ok(Some(buf));
+        }
+
+        if buf.len() > MAX_HEADER_BYTES {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "request head too big",
+            ));
+        }
+    }
 }
 
 async fn write_fragments(
