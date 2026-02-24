@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
@@ -31,7 +31,7 @@ impl ProxyStats {
     }
 
     pub fn print_summary(&self) {
-        println!("\n📊 Statistics:");
+        println!("\nStatistics:");
         println!(
             "   Connections: {} total, {} active",
             self.connections_total.load(Ordering::Relaxed),
@@ -65,6 +65,7 @@ pub struct ProxyConfig {
     pub bypass: BypassConfig,
     pub connect_timeout: Duration,
     pub buffer_size: usize,
+    pub max_connections: usize,
     pub verbose: bool,
 }
 
@@ -74,7 +75,8 @@ impl Default for ProxyConfig {
             listen_addr: "127.0.0.1:8844".parse().unwrap(),
             bypass: BypassConfig::default(),
             connect_timeout: Duration::from_secs(30),
-            buffer_size: 65536,
+            buffer_size: 32768,
+            max_connections: 512,
             verbose: false,
         }
     }
@@ -155,12 +157,21 @@ impl BypassProxy {
         let stats = self.stats.clone();
         let dns = self.dns.clone();
         let running = self.running.clone();
+        let limit = Arc::new(Semaphore::new(self.config.max_connections.max(1)));
 
         loop {
             tokio::select! {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, peer_addr)) => {
+                            let permit = match limit.clone().try_acquire_owned() {
+                                Ok(permit) => permit,
+                                Err(_) => {
+                                    warn!("connection limit reached, rejecting {}", peer_addr);
+                                    continue;
+                                }
+                            };
+
                             let config = config.clone();
                             let stats = stats.clone();
                             let dns = dns.clone();
@@ -177,6 +188,7 @@ impl BypassProxy {
                                     stats.errors.fetch_add(1, Ordering::Relaxed);
                                 }
                                 stats.connections_active.fetch_sub(1, Ordering::Relaxed);
+                                drop(permit);
                             });
                         }
                         Err(e) => {
