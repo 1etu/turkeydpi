@@ -368,7 +368,7 @@ async fn handle_connect(
 
     write_fragments(&mut remote, &result, &stats).await?;
 
-    relay_bidirectional(client, remote, stats, config.buffer_size).await;
+    relay_bidirectional(client, remote, stats).await;
 
     Ok(())
 }
@@ -451,55 +451,16 @@ fn extract_connect_target(request: &str) -> io::Result<String> {
     }
 }
 
-async fn relay_bidirectional(
-    client: TcpStream,
-    remote: TcpStream,
-    stats: Arc<ProxyStats>,
-    buffer_size: usize,
-) {
-    let (mut client_read, mut client_write) = client.into_split();
-    let (mut remote_read, mut remote_write) = remote.into_split();
-
-    let stats_up = stats.clone();
-    let stats_down = stats.clone();
-
-    let client_to_remote = async move {
-        let mut buf = vec![0u8; buffer_size];
-        loop {
-            match client_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if remote_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                    stats_up.bytes_sent.fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Err(_) => break,
-            }
+async fn relay_bidirectional(mut client: TcpStream, mut remote: TcpStream, stats: Arc<ProxyStats>) {
+    match tokio::io::copy_bidirectional(&mut client, &mut remote).await {
+        Ok((up, down)) => {
+            stats.bytes_sent.fetch_add(up, Ordering::Relaxed);
+            stats.bytes_received.fetch_add(down, Ordering::Relaxed);
         }
-        let _ = remote_write.shutdown().await;
-    };
-
-    let remote_to_client = async move {
-        let mut buf = vec![0u8; buffer_size];
-        loop {
-            match remote_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if client_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                    stats_down
-                        .bytes_received
-                        .fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Err(_) => break,
-            }
+        Err(e) => {
+            debug!("relay ended: {}", e);
         }
-        let _ = client_write.shutdown().await;
-    };
-
-    tokio::join!(client_to_remote, remote_to_client);
+    }
 }
 
 fn extract_http_target(request: &str) -> Option<String> {
@@ -620,54 +581,7 @@ async fn handle_http_forward(
 
     write_fragments(&mut remote, &result, &stats).await?;
 
-    let (mut client_read, mut client_write) = client.into_split();
-    let (mut remote_read, mut remote_write) = remote.into_split();
-
-    let stats_clone = stats.clone();
-    let buffer_size = config.buffer_size;
-    let idle_timeout = std::time::Duration::from_secs(30);
-
-    let client_to_remote = async {
-        let mut buf = vec![0u8; buffer_size];
-        loop {
-            match tokio::time::timeout(idle_timeout, client_read.read(&mut buf)).await {
-                Ok(Ok(0)) => break,
-                Ok(Ok(n)) => {
-                    if remote_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                    stats_clone
-                        .bytes_sent
-                        .fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Ok(Err(_)) | Err(_) => break,
-            }
-        }
-    };
-
-    let stats_clone2 = stats.clone();
-    let remote_to_client = async {
-        let mut buf = vec![0u8; buffer_size];
-        loop {
-            match tokio::time::timeout(idle_timeout, remote_read.read(&mut buf)).await {
-                Ok(Ok(0)) => break,
-                Ok(Ok(n)) => {
-                    if client_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                    stats_clone2
-                        .bytes_received
-                        .fetch_add(n as u64, Ordering::Relaxed);
-                }
-                Ok(Err(_)) | Err(_) => break,
-            }
-        }
-    };
-
-    tokio::select! {
-        _ = client_to_remote => {},
-        _ = remote_to_client => {},
-    }
+    relay_bidirectional(client, remote, stats).await;
 
     Ok(())
 }
