@@ -611,16 +611,34 @@ fn rewrite_http_request(request: &str, raw: &[u8]) -> Vec<u8> {
         url
     };
 
-    let new_first_line = format!("{} {} {}", method, path, version);
+    let header_end = match find_header_end(raw) {
+        Some(end) => end,
+        None => return raw.to_vec(),
+    };
 
-    let first_line_end = raw
-        .iter()
-        .position(|&b| b == b'\r' || b == b'\n')
-        .unwrap_or(0);
+    let mut out = format!("{} {} {}\r\n", method, path, version).into_bytes();
 
-    let mut result = new_first_line.into_bytes();
-    result.extend_from_slice(&raw[first_line_end..]);
-    result
+    for line in request.lines().skip(1) {
+        if line.is_empty() {
+            break;
+        }
+
+        let name = line.split(':').next().unwrap_or("").trim().to_lowercase();
+        if name == "proxy-connection" || name == "connection" || name == "keep-alive" {
+            continue;
+        }
+
+        out.extend_from_slice(line.as_bytes());
+        out.extend_from_slice(b"\r\n");
+    }
+
+    out.extend_from_slice(b"Connection: close\r\n\r\n");
+    out.extend_from_slice(&raw[header_end..]);
+    out
+}
+
+fn find_header_end(raw: &[u8]) -> Option<usize> {
+    raw.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
 }
 
 fn extract_host_header(request: &str) -> Option<String> {
@@ -651,5 +669,30 @@ mod tests {
         assert_eq!(config.listen_addr.port(), 8844);
         assert!(config.bypass.fragment_sni);
         assert!(config.bypass.fragment_http_host);
+    }
+
+    #[test]
+    fn test_rewrite_http_request_forces_close() {
+        let raw = b"GET http://discord.com/api HTTP/1.1\r\nHost: discord.com\r\nProxy-Connection: keep-alive\r\nConnection: keep-alive\r\n\r\n";
+        let request = String::from_utf8_lossy(raw);
+        let out = rewrite_http_request(&request, raw);
+        let text = String::from_utf8(out).unwrap();
+
+        assert!(text.starts_with("GET /api HTTP/1.1\r\n"));
+        assert!(text.contains("Host: discord.com\r\n"));
+        assert!(text.contains("Connection: close\r\n"));
+        assert!(!text.to_lowercase().contains("proxy-connection"));
+        assert!(!text.to_lowercase().contains("keep-alive"));
+    }
+
+    #[test]
+    fn test_rewrite_http_request_keeps_body() {
+        let raw = b"POST http://a.com/x HTTP/1.1\r\nHost: a.com\r\nContent-Length: 5\r\n\r\nhello";
+        let request = String::from_utf8_lossy(raw);
+        let out = rewrite_http_request(&request, raw);
+        let text = String::from_utf8(out).unwrap();
+
+        assert!(text.ends_with("\r\n\r\nhello"));
+        assert!(text.contains("Content-Length: 5"));
     }
 }
