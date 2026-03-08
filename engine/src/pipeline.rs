@@ -235,7 +235,7 @@ impl Pipeline {
         None
     }
 
-    pub fn process(&self, key: FlowKey, mut data: BytesMut) -> Result<PipelineOutput> {
+    pub fn process(&self, key: FlowKey, data: BytesMut) -> Result<PipelineOutput> {
         let config = self.config.read().clone();
 
         if !config.global.enabled {
