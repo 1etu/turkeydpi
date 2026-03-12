@@ -66,6 +66,7 @@ pub struct ProxyConfig {
     pub connect_timeout: Duration,
     pub buffer_size: usize,
     pub max_connections: usize,
+    pub allow_system_dns: bool,
     pub verbose: bool,
 }
 
@@ -77,6 +78,7 @@ impl Default for ProxyConfig {
             connect_timeout: Duration::from_secs(30),
             buffer_size: 32768,
             max_connections: 512,
+            allow_system_dns: false,
             verbose: false,
         }
     }
@@ -265,57 +267,19 @@ async fn handle_connect(
         debug!("{} -> CONNECT {}", peer_addr, target);
     }
 
-    let resolved_addr = match dns.resolve_host_port(&target).await {
-        Ok(addr) => {
-            stats.dns_queries.fetch_add(1, Ordering::Relaxed);
-            if config.verbose {
-                debug!("DoH resolved {} -> {}", target, addr);
-            }
-            addr
-        }
+    let mut remote = match connect_target(&dns, &target, &config, &stats).await {
+        Ok(stream) => stream,
         Err(e) => {
-            warn!("DoH resolution failed for {}: {}", target, e);
-            match tokio::net::lookup_host(&target).await {
-                Ok(mut addrs) => {
-                    if let Some(addr) = addrs.next() {
-                        addr
-                    } else {
-                        let msg = format!(
-                            "HTTP/1.1 502 Bad Gateway\r\n\r\nDNS resolution failed: {}\r\n",
-                            e
-                        );
-                        client.write_all(msg.as_bytes()).await?;
-                        return Err(io::Error::new(ErrorKind::NotFound, "DNS resolution failed"));
-                    }
-                }
-                Err(_) => {
-                    let msg = format!(
-                        "HTTP/1.1 502 Bad Gateway\r\n\r\nDNS resolution failed: {}\r\n",
-                        e
-                    );
-                    client.write_all(msg.as_bytes()).await?;
-                    return Err(io::Error::new(ErrorKind::NotFound, "DNS resolution failed"));
-                }
-            }
+            let status = if e.kind() == ErrorKind::TimedOut {
+                "504 Gateway Timeout"
+            } else {
+                "502 Bad Gateway"
+            };
+            let msg = format!("HTTP/1.1 {}\r\n\r\n{}\r\n", status, e);
+            client.write_all(msg.as_bytes()).await?;
+            return Err(e);
         }
     };
-
-    let mut remote =
-        match tokio::time::timeout(config.connect_timeout, TcpStream::connect(resolved_addr)).await
-        {
-            Ok(Ok(stream)) => stream,
-            Ok(Err(e)) => {
-                let msg = format!("HTTP/1.1 502 Bad Gateway\r\n\r\n{}\r\n", e);
-                client.write_all(msg.as_bytes()).await?;
-                return Err(e);
-            }
-            Err(_) => {
-                client
-                    .write_all(b"HTTP/1.1 504 Gateway Timeout\r\n\r\n")
-                    .await?;
-                return Err(io::Error::new(ErrorKind::TimedOut, "Connection timeout"));
-            }
-        };
 
     client
         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -371,6 +335,54 @@ async fn handle_connect(
     relay_bidirectional(client, remote, stats).await;
 
     Ok(())
+}
+
+async fn connect_target(
+    dns: &Arc<DohResolver>,
+    target: &str,
+    config: &ProxyConfig,
+    stats: &Arc<ProxyStats>,
+) -> io::Result<TcpStream> {
+    let addrs = match dns.resolve_socket_addrs(target).await {
+        Ok(addrs) => {
+            stats.dns_queries.fetch_add(1, Ordering::Relaxed);
+            if config.verbose {
+                debug!("DoH resolved {} -> {:?}", target, addrs);
+            }
+            addrs
+        }
+        Err(e) => {
+            if !config.allow_system_dns {
+                warn!("DoH resolution failed for {}: {}", target, e);
+                return Err(e);
+            }
+
+            warn!(
+                "DoH failed for {}, falling back to system dns: {}",
+                target, e
+            );
+            tokio::net::lookup_host(target).await?.collect()
+        }
+    };
+
+    let mut last_error = None;
+
+    for addr in addrs {
+        match tokio::time::timeout(config.connect_timeout, TcpStream::connect(addr)).await {
+            Ok(Ok(stream)) => return Ok(stream),
+            Ok(Err(e)) => {
+                if config.verbose {
+                    debug!("connect to {} failed: {}", addr, e);
+                }
+                last_error = Some(e);
+            }
+            Err(_) => {
+                last_error = Some(io::Error::new(ErrorKind::TimedOut, "connect timeout"));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| io::Error::new(ErrorKind::NotFound, "no address to connect")))
 }
 
 const MAX_HEADER_BYTES: usize = 64 * 1024;
@@ -517,47 +529,19 @@ async fn handle_http_forward(
         debug!("{} -> HTTP {}", peer_addr, target);
     }
 
-    let resolved_addr = match dns.resolve_host_port(&target).await {
-        Ok(addr) => {
-            stats.dns_queries.fetch_add(1, Ordering::Relaxed);
-            addr
+    let mut remote = match connect_target(&dns, &target, &config, &stats).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            let status = if e.kind() == ErrorKind::TimedOut {
+                "504 Gateway Timeout"
+            } else {
+                "502 Bad Gateway"
+            };
+            let msg = format!("HTTP/1.1 {}\r\n\r\n{}\r\n", status, e);
+            client.write_all(msg.as_bytes()).await?;
+            return Err(e);
         }
-        Err(_) => match tokio::net::lookup_host(&target).await {
-            Ok(mut addrs) => {
-                if let Some(addr) = addrs.next() {
-                    addr
-                } else {
-                    client
-                        .write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                        .await?;
-                    return Err(io::Error::new(ErrorKind::NotFound, "DNS resolution failed"));
-                }
-            }
-            Err(e) => {
-                client
-                    .write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-                    .await?;
-                return Err(io::Error::new(ErrorKind::NotFound, e.to_string()));
-            }
-        },
     };
-
-    let mut remote =
-        match tokio::time::timeout(config.connect_timeout, TcpStream::connect(resolved_addr)).await
-        {
-            Ok(Ok(stream)) => stream,
-            Ok(Err(e)) => {
-                let msg = format!("HTTP/1.1 502 Bad Gateway\r\n\r\n{}\r\n", e);
-                client.write_all(msg.as_bytes()).await?;
-                return Err(e);
-            }
-            Err(_) => {
-                client
-                    .write_all(b"HTTP/1.1 504 Gateway Timeout\r\n\r\n")
-                    .await?;
-                return Err(io::Error::new(ErrorKind::TimedOut, "Connection timeout"));
-            }
-        };
 
     let rewritten_request = rewrite_http_request(request, raw_request);
 
@@ -639,15 +623,6 @@ fn rewrite_http_request(request: &str, raw: &[u8]) -> Vec<u8> {
 
 fn find_header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4)
-}
-
-fn extract_host_header(request: &str) -> Option<String> {
-    for line in request.lines() {
-        if line.to_lowercase().starts_with("host:") {
-            return Some(line[5..].trim().to_string());
-        }
-    }
-    None
 }
 
 #[cfg(test)]
