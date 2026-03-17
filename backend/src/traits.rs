@@ -169,6 +169,6 @@ mod tests {
 
         let proxy = ProxySettings::default();
         assert!(proxy.bypass.fragment_sni);
-        assert_eq!(proxy.max_connections, 1000);
+        assert_eq!(proxy.max_connections, 512);
     }
 }
