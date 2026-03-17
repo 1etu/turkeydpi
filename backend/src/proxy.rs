@@ -3,20 +3,28 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::BytesMut;
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use engine::config::Protocol;
-use engine::{FlowKey, Pipeline, Stats};
+use engine::{BypassConfig, BypassEngine, DetectedProtocol, DohResolver, Pipeline, Stats};
 
 use crate::error::{BackendError, Result};
-use crate::traits::{
-    Backend, BackendConfig, BackendHandle, BackendSettings, ProxySettings, ProxyType,
-};
+use crate::traits::{Backend, BackendConfig, BackendHandle, BackendSettings, ProxySettings};
+
+const SOCKS5_VERSION: u8 = 0x05;
+const SOCKS5_NO_AUTH: u8 = 0x00;
+const SOCKS5_CMD_CONNECT: u8 = 0x01;
+const SOCKS5_ATYP_IPV4: u8 = 0x01;
+const SOCKS5_ATYP_DOMAIN: u8 = 0x03;
+const SOCKS5_ATYP_IPV6: u8 = 0x04;
+
+const REPLY_SUCCESS: u8 = 0x00;
+const REPLY_HOST_UNREACHABLE: u8 = 0x04;
+const REPLY_CMD_NOT_SUPPORTED: u8 = 0x07;
+const REPLY_ATYP_NOT_SUPPORTED: u8 = 0x08;
 
 pub struct ProxyBackend {
     running: Arc<AtomicBool>,
@@ -40,221 +48,182 @@ impl ProxyBackend {
     async fn handle_socks5(
         mut client: TcpStream,
         client_addr: SocketAddr,
-        pipeline: Arc<Pipeline>,
-        stats: Arc<Stats>,
+        bypass: BypassConfig,
+        dns: Arc<DohResolver>,
         active_conns: Arc<AtomicU64>,
     ) {
         let _guard = ConnectionGuard::new(active_conns);
 
         debug!(client = %client_addr, "New SOCKS5 connection");
 
-        let mut buf = [0u8; 2];
-        if client.read_exact(&mut buf).await.is_err() {
-            return;
-        }
-
-        let version = buf[0];
-        let nmethods = buf[1] as usize;
-
-        if version != 0x05 {
-            warn!(version, "inv SOCKS version");
-            return;
-        }
-
-        let mut methods = vec![0u8; nmethods];
-        if client.read_exact(&mut methods).await.is_err() {
-            return;
-        }
-
-        if !methods.contains(&0x00) {
-            let _ = client.write_all(&[0x05, 0xFF]).await;
-            return;
-        }
-
-        if client.write_all(&[0x05, 0x00]).await.is_err() {
-            return;
-        }
-
-        let mut request = [0u8; 4];
-        if client.read_exact(&mut request).await.is_err() {
-            return;
-        }
-
-        let cmd = request[1];
-        let atyp = request[3];
-
-        if cmd != 0x01 {
-            let response = [0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-            let _ = client.write_all(&response).await;
-            return;
-        }
-
-        let (dst_addr, dst_port) = match atyp {
-            0x01 => {
-                let mut addr = [0u8; 4];
-                if client.read_exact(&mut addr).await.is_err() {
-                    return;
-                }
-                let mut port_buf = [0u8; 2];
-                if client.read_exact(&mut port_buf).await.is_err() {
-                    return;
-                }
-                let port = u16::from_be_bytes(port_buf);
-                let ip = std::net::Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]);
-                (std::net::IpAddr::V4(ip), port)
-            }
-            0x03 => {
-                let mut len = [0u8; 1];
-                if client.read_exact(&mut len).await.is_err() {
-                    return;
-                }
-                let mut domain = vec![0u8; len[0] as usize];
-                if client.read_exact(&mut domain).await.is_err() {
-                    return;
-                }
-                let mut port_buf = [0u8; 2];
-                if client.read_exact(&mut port_buf).await.is_err() {
-                    return;
-                }
-                let port = u16::from_be_bytes(port_buf);
-
-                let domain_str = match String::from_utf8(domain) {
-                    Ok(s) => s,
-                    Err(_) => return,
-                };
-
-                let resolved =
-                    match tokio::net::lookup_host(format!("{}:{}", domain_str, port)).await {
-                        Ok(mut addrs) => match addrs.next() {
-                            Some(addr) => addr,
-                            None => return,
-                        },
-                        Err(_) => {
-                            let response = [0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-                            let _ = client.write_all(&response).await;
-                            return;
-                        }
-                    };
-
-                (resolved.ip(), port)
-            }
-            0x04 => {
-                let mut addr = [0u8; 16];
-                if client.read_exact(&mut addr).await.is_err() {
-                    return;
-                }
-                let mut port_buf = [0u8; 2];
-                if client.read_exact(&mut port_buf).await.is_err() {
-                    return;
-                }
-                let port = u16::from_be_bytes(port_buf);
-                let ip = std::net::Ipv6Addr::from(addr);
-                (std::net::IpAddr::V6(ip), port)
-            }
-            _ => {
-                let response = [0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-                let _ = client.write_all(&response).await;
-                return;
-            }
-        };
-
-        debug!(dst = %dst_addr, port = dst_port, "SOCKS5 CONNECT request");
-
-        let remote = match TcpStream::connect((dst_addr, dst_port)).await {
-            Ok(stream) => stream,
+        let target = match Self::socks5_handshake(&mut client).await {
+            Ok(Some(target)) => target,
+            Ok(None) => return,
             Err(e) => {
-                warn!(error = %e, dst = %dst_addr, port = dst_port, "Failed to connect");
-                let response = [0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-                let _ = client.write_all(&response).await;
+                debug!(client = %client_addr, error = %e, "SOCKS5 handshake failed");
                 return;
             }
         };
 
-        let response = [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0];
-        if client.write_all(&response).await.is_err() {
+        let addrs = match dns.resolve_socket_addrs(&target).await {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                warn!(target = %target, error = %e, "SOCKS5 resolution failed");
+                let _ = Self::send_reply(&mut client, REPLY_HOST_UNREACHABLE).await;
+                return;
+            }
+        };
+
+        let mut connected = None;
+        for addr in addrs {
+            if let Ok(stream) = TcpStream::connect(addr).await {
+                connected = Some(stream);
+                break;
+            }
+        }
+
+        let mut remote = match connected {
+            Some(stream) => stream,
+            None => {
+                warn!(target = %target, "SOCKS5 connect failed");
+                let _ = Self::send_reply(&mut client, REPLY_HOST_UNREACHABLE).await;
+                return;
+            }
+        };
+
+        if Self::send_reply(&mut client, REPLY_SUCCESS).await.is_err() {
             return;
         }
 
-        let flow_key = FlowKey::new(
-            client_addr.ip(),
-            dst_addr,
-            client_addr.port(),
-            dst_port,
-            Protocol::Tcp,
-        );
+        let _ = client.set_nodelay(true);
+        let _ = remote.set_nodelay(true);
 
-        Self::relay_streams(client, remote, flow_key, pipeline, stats).await;
+        if Self::forward_first_write(&mut client, &mut remote, &bypass)
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        let _ = tokio::io::copy_bidirectional(&mut client, &mut remote).await;
     }
 
-    async fn relay_streams(
-        mut client: TcpStream,
-        mut remote: TcpStream,
-        flow_key: FlowKey,
-        pipeline: Arc<Pipeline>,
-        stats: Arc<Stats>,
-    ) {
-        let (mut client_read, mut client_write) = client.split();
-        let (mut remote_read, mut remote_write) = remote.split();
+    async fn socks5_handshake(client: &mut TcpStream) -> std::io::Result<Option<String>> {
+        let mut greeting = [0u8; 2];
+        client.read_exact(&mut greeting).await?;
 
-        let _flow_key_rev = flow_key.reverse();
-        let _pipeline_clone = pipeline.clone();
-        let stats_clone = stats.clone();
-
-        let outbound = async move {
-            let mut buf = BytesMut::with_capacity(4096);
-            buf.resize(4096, 0);
-
-            loop {
-                let n = match client_read.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => n,
-                    Err(_) => break,
-                };
-
-                let data = BytesMut::from(&buf[..n]);
-
-                match pipeline.process(flow_key, data) {
-                    Ok(output) => {
-                        for packet in output.all_packets() {
-                            if remote_write.write_all(&packet).await.is_err() {
-                                return;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Pipeline processing error");
-                        break;
-                    }
-                }
-            }
-        };
-
-        let inbound = async move {
-            let mut buf = BytesMut::with_capacity(4096);
-            buf.resize(4096, 0);
-
-            loop {
-                let n = match remote_read.read(&mut buf).await {
-                    Ok(0) => break,
-                    Ok(n) => n,
-                    Err(_) => break,
-                };
-
-                if client_write.write_all(&buf[..n]).await.is_err() {
-                    break;
-                }
-
-                stats_clone.record_packet_in(n);
-                stats_clone.record_packet_out(n);
-            }
-        };
-
-        tokio::select! {
-            _ = outbound => {}
-            _ = inbound => {}
+        if greeting[0] != SOCKS5_VERSION {
+            return Ok(None);
         }
 
-        debug!(flow = ?flow_key, "Connection closed");
+        let mut methods = vec![0u8; greeting[1] as usize];
+        client.read_exact(&mut methods).await?;
+
+        if !methods.contains(&SOCKS5_NO_AUTH) {
+            client.write_all(&[SOCKS5_VERSION, 0xFF]).await?;
+            return Ok(None);
+        }
+
+        client.write_all(&[SOCKS5_VERSION, SOCKS5_NO_AUTH]).await?;
+
+        let mut request = [0u8; 4];
+        client.read_exact(&mut request).await?;
+
+        if request[1] != SOCKS5_CMD_CONNECT {
+            Self::send_reply(client, REPLY_CMD_NOT_SUPPORTED).await?;
+            return Ok(None);
+        }
+
+        let host = match request[3] {
+            SOCKS5_ATYP_IPV4 => {
+                let mut addr = [0u8; 4];
+                client.read_exact(&mut addr).await?;
+                std::net::Ipv4Addr::from(addr).to_string()
+            }
+            SOCKS5_ATYP_IPV6 => {
+                let mut addr = [0u8; 16];
+                client.read_exact(&mut addr).await?;
+                format!("[{}]", std::net::Ipv6Addr::from(addr))
+            }
+            SOCKS5_ATYP_DOMAIN => {
+                let mut len = [0u8; 1];
+                client.read_exact(&mut len).await?;
+                let mut domain = vec![0u8; len[0] as usize];
+                client.read_exact(&mut domain).await?;
+                String::from_utf8(domain).map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid domain")
+                })?
+            }
+            _ => {
+                Self::send_reply(client, REPLY_ATYP_NOT_SUPPORTED).await?;
+                return Ok(None);
+            }
+        };
+
+        let mut port_buf = [0u8; 2];
+        client.read_exact(&mut port_buf).await?;
+        let port = u16::from_be_bytes(port_buf);
+
+        Ok(Some(format!("{}:{}", host, port)))
+    }
+
+    async fn send_reply(client: &mut TcpStream, code: u8) -> std::io::Result<()> {
+        let reply = [
+            SOCKS5_VERSION,
+            code,
+            0x00,
+            SOCKS5_ATYP_IPV4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        client.write_all(&reply).await
+    }
+
+    async fn forward_first_write(
+        client: &mut TcpStream,
+        remote: &mut TcpStream,
+        bypass: &BypassConfig,
+    ) -> std::io::Result<()> {
+        let mut buf = vec![0u8; 65536];
+
+        let n = client.read(&mut buf).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "client closed",
+            ));
+        }
+
+        let engine = BypassEngine::new(bypass.clone());
+        let result = engine.process_outgoing(&buf[..n]);
+
+        if let Some(ref host) = result.hostname {
+            match result.protocol {
+                DetectedProtocol::TlsClientHello if result.modified => {
+                    info!("{} [SNI fragmented]", host)
+                }
+                DetectedProtocol::HttpRequest if result.modified => {
+                    info!("{} [Host fragmented]", host)
+                }
+                _ => debug!("{} [passthrough]", host),
+            }
+        }
+
+        let last = result.fragments.len().saturating_sub(1);
+        for (i, fragment) in result.fragments.iter().enumerate() {
+            remote.write_all(fragment).await?;
+            if i < last {
+                if let Some(delay) = result.inter_fragment_delay {
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+
+        remote.flush().await
     }
 }
 
@@ -301,11 +270,7 @@ impl Backend for ProxyBackend {
             }
         };
 
-        info!(
-            addr = %proxy_settings.listen_addr,
-            proxy_type = ?proxy_settings.proxy_type,
-            "Starting proxy backend"
-        );
+        info!(addr = %proxy_settings.listen_addr, "Starting SOCKS5 backend");
 
         let listener = TcpListener::bind(proxy_settings.listen_addr)
             .await
@@ -323,19 +288,18 @@ impl Backend for ProxyBackend {
         self.running.store(true, Ordering::SeqCst);
 
         let running = self.running.clone();
-        let pipeline_clone = pipeline.clone();
-        let stats_clone = stats.clone();
         let max_connections = proxy_settings.max_connections;
         let active_connections = self.active_connections.clone();
-        let proxy_type = proxy_settings.proxy_type;
+        let bypass = proxy_settings.bypass.clone();
+        let dns = Arc::new(DohResolver::new());
 
         let handle = tokio::spawn(async move {
-            info!("Proxy backend accepting connections");
+            info!("SOCKS5 backend accepting connections");
 
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
-                        info!("Proxy backend received shutdown signal");
+                        info!("SOCKS5 backend received shutdown signal");
                         break;
                     }
                     result = listener.accept() => {
@@ -346,20 +310,13 @@ impl Backend for ProxyBackend {
                                     continue;
                                 }
 
-                                let pipeline = pipeline_clone.clone();
-                                let stats = stats_clone.clone();
-                                let active = active_connections.clone();
-
-                                match proxy_type {
-                                    ProxyType::Socks5 => {
-                                        tokio::spawn(Self::handle_socks5(
-                                            stream, addr, pipeline, stats, active
-                                        ));
-                                    }
-                                    ProxyType::HttpConnect => {
-                                        warn!("--");
-                                    }
-                                }
+                                tokio::spawn(Self::handle_socks5(
+                                    stream,
+                                    addr,
+                                    bypass.clone(),
+                                    dns.clone(),
+                                    active_connections.clone(),
+                                ));
                             }
                             Err(e) => {
                                 error!(error = %e, "Failed to accept connection");
@@ -370,7 +327,7 @@ impl Backend for ProxyBackend {
             }
 
             running.store(false, Ordering::SeqCst);
-            info!("Proxy backend stopped");
+            info!("SOCKS5 backend stopped");
         });
 
         *self.task_handle.lock() = Some(handle);
@@ -387,7 +344,7 @@ impl Backend for ProxyBackend {
             return Err(BackendError::NotRunning);
         }
 
-        info!("Stopping proxy backend");
+        info!("Stopping SOCKS5 backend");
 
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
@@ -401,7 +358,7 @@ impl Backend for ProxyBackend {
         self.running.store(false, Ordering::SeqCst);
         self.config = None;
 
-        info!("Proxy backend stopped");
+        info!("SOCKS5 backend stopped");
         Ok(())
     }
 
@@ -443,8 +400,9 @@ mod tests {
             }),
         };
 
-        let _handle = backend.start(config).await.unwrap();
+        let handle = backend.start(config).await.unwrap();
         assert!(backend.is_running());
+        drop(handle);
 
         backend.stop().await.unwrap();
         assert!(!backend.is_running());

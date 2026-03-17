@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bytes::BytesMut;
 use tokio::sync::mpsc;
 
-use engine::{Config, FlowKey, Pipeline, Stats};
+use engine::{BypassConfig, Config, FlowKey, Pipeline, Stats};
 
 use crate::error::Result;
 
@@ -93,7 +93,7 @@ impl Default for TunSettings {
 #[derive(Debug, Clone)]
 pub struct ProxySettings {
     pub listen_addr: SocketAddr,
-    pub proxy_type: ProxyType,
+    pub bypass: BypassConfig,
     pub max_connections: usize,
     pub timeout_secs: u64,
 }
@@ -102,17 +102,11 @@ impl Default for ProxySettings {
     fn default() -> Self {
         Self {
             listen_addr: "127.0.0.1:1080".parse().unwrap(),
-            proxy_type: ProxyType::Socks5,
-            max_connections: 1000,
+            bypass: BypassConfig::default(),
+            max_connections: 512,
             timeout_secs: 300,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProxyType {
-    Socks5,
-    HttpConnect,
 }
 
 pub struct BackendHandle {
@@ -174,7 +168,7 @@ mod tests {
         assert_eq!(tun.address, "10.0.85.1");
 
         let proxy = ProxySettings::default();
-        assert_eq!(proxy.proxy_type, ProxyType::Socks5);
+        assert!(proxy.bypass.fragment_sni);
         assert_eq!(proxy.max_connections, 1000);
     }
 }
