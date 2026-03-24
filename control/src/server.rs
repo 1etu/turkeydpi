@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use parking_lot::RwLock;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
@@ -18,6 +18,7 @@ use crate::messages::{
     Command, EngineState, HealthInfo, Request, Response, ResponseData, Status, SystemInfo,
     API_VERSION,
 };
+use crate::transport;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -30,7 +31,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            socket_path: PathBuf::from("/tmp/turkeydpi.sock"),
+            socket_path: transport::default_socket_path(),
             max_clients: 10,
             timeout_secs: 30,
             enable_notifications: true,
@@ -86,18 +87,11 @@ impl ControlServer {
 
         let socket_path = &self.server_config.socket_path;
 
-        if socket_path.exists() {
-            std::fs::remove_file(socket_path)?;
-        }
-
-        if let Some(parent) = socket_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
         info!(socket = %socket_path.display(), "Starting control server");
 
-        let listener =
-            UnixListener::bind(socket_path).map_err(|e| ControlError::BindFailed(e.to_string()))?;
+        let listener = transport::bind(socket_path)
+            .await
+            .map_err(|e| ControlError::BindFailed(e.to_string()))?;
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
@@ -159,7 +153,7 @@ impl ControlServer {
             let _ = tx.send(()).await;
         }
 
-        let _ = std::fs::remove_file(&self.server_config.socket_path);
+        transport::cleanup(&self.server_config.socket_path);
 
         self.running.store(false, Ordering::SeqCst);
         Ok(())
@@ -169,7 +163,7 @@ impl ControlServer {
         self.running.load(Ordering::SeqCst)
     }
 
-    async fn handle_client(stream: UnixStream, state: Arc<ServerState>) -> Result<()> {
+    async fn handle_client(stream: transport::Stream, state: Arc<ServerState>) -> Result<()> {
         let (reader, mut writer) = stream.into_split();
         let mut reader = BufReader::new(reader);
         let mut line = String::new();
@@ -392,7 +386,7 @@ impl ControlClient {
     }
 
     pub async fn send(&mut self, command: Command) -> Result<Response> {
-        let stream = UnixStream::connect(&self.socket_path)
+        let stream = transport::connect(&self.socket_path)
             .await
             .map_err(|e| ControlError::Connection(e.to_string()))?;
 
