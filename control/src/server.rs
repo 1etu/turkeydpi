@@ -101,9 +101,9 @@ impl ControlServer {
         let state = self.state.clone();
         let max_clients = self.server_config.max_clients;
 
-        tokio::spawn(async move {
-            let mut active_clients = 0usize;
+        let clients = Arc::new(tokio::sync::Semaphore::new(max_clients.max(1)));
 
+        tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
@@ -113,18 +113,21 @@ impl ControlServer {
                     result = listener.accept() => {
                         match result {
                             Ok((stream, _addr)) => {
-                                if active_clients >= max_clients {
-                                    warn!("Max clients reached, rejecting connection");
-                                    continue;
-                                }
+                                let permit = match clients.clone().try_acquire_owned() {
+                                    Ok(permit) => permit,
+                                    Err(_) => {
+                                        warn!("Max clients reached, rejecting connection");
+                                        continue;
+                                    }
+                                };
 
-                                active_clients += 1;
                                 let state = state.clone();
 
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_client(stream, state).await {
                                         debug!(error = %e, "Client handler error");
                                     }
+                                    drop(permit);
                                 });
                             }
                             Err(e) => {
@@ -528,6 +531,33 @@ mod tests {
             assert!(timestamp > 0);
         } else {
             panic!("Expected Pong response");
+        }
+
+        server.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_many_sequential_clients() {
+        let temp_dir = tempdir().unwrap();
+        let socket_path = temp_dir.path().join("test.sock");
+
+        let server_config = ServerConfig {
+            socket_path: socket_path.clone(),
+            max_clients: 4,
+            ..Default::default()
+        };
+
+        let mut server = ControlServer::new(server_config, Config::default());
+        server.start().await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        for i in 0..40 {
+            let mut client = ControlClient::new(&socket_path);
+            let response = client
+                .send(Command::Ping)
+                .await
+                .unwrap_or_else(|e| panic!("request {} failed: {}", i, e));
+            assert!(response.success, "request {} was rejected", i);
         }
 
         server.stop().await.unwrap();
