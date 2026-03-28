@@ -41,6 +41,7 @@ impl Default for ServerConfig {
 
 struct ServerState {
     config: RwLock<Config>,
+    proxy_settings: RwLock<ProxySettings>,
     backend_handle: RwLock<Option<BackendHandle>>,
     engine_state: RwLock<EngineState>,
     start_time: Instant,
@@ -53,6 +54,7 @@ impl ServerState {
     fn new(config: Config) -> Self {
         Self {
             config: RwLock::new(config),
+            proxy_settings: RwLock::new(ProxySettings::default()),
             backend_handle: RwLock::new(None),
             engine_state: RwLock::new(EngineState::Stopped),
             start_time: Instant::now(),
@@ -228,7 +230,7 @@ impl ControlServer {
                 let backend_config = BackendConfig {
                     engine_config: config,
                     max_queue_size: 1000,
-                    backend_settings: BackendSettings::Proxy(ProxySettings::default()),
+                    backend_settings: BackendSettings::Proxy(state.proxy_settings.read().clone()),
                 };
 
                 let mut backend = ProxyBackend::new();
@@ -274,13 +276,16 @@ impl ControlServer {
             }
 
             Command::SetConfig(new_config) => match new_config.validate() {
-                Ok(()) => Response::success(
-                    id,
-                    ResponseData::Validation {
-                        valid: true,
-                        errors: vec![],
-                    },
-                ),
+                Ok(()) => {
+                    *state.config.write() = new_config.clone();
+                    Response::success(
+                        id,
+                        ResponseData::Validation {
+                            valid: true,
+                            errors: vec![],
+                        },
+                    )
+                }
                 Err(e) => Response::success(
                     id,
                     ResponseData::Validation {
@@ -372,6 +377,10 @@ impl ControlServer {
 
     pub fn socket_path(&self) -> &Path {
         &self.server_config.socket_path
+    }
+
+    pub fn set_proxy_settings(&self, settings: ProxySettings) {
+        *self.state.proxy_settings.write() = settings;
     }
 }
 
