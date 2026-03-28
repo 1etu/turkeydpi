@@ -113,7 +113,17 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
         ..Default::default()
     };
 
+    let listen_addr: std::net::SocketAddr = listen
+        .parse()
+        .with_context(|| format!("Invalid listen address: {}", listen))?;
+
+    let proxy_settings = backend::ProxySettings {
+        listen_addr,
+        ..Default::default()
+    };
+
     let mut server = ControlServer::new(server_config, config.clone());
+    server.set_proxy_settings(proxy_settings.clone());
     server.start().await?;
 
     info!(socket = %cli.socket.display(), "Control server started");
@@ -121,17 +131,10 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
     if proxy {
         info!(listen = %listen, "Starting proxy backend");
 
-        let listen_addr: std::net::SocketAddr = listen
-            .parse()
-            .with_context(|| format!("Invalid listen address: {}", listen))?;
-
         let backend_config = backend::BackendConfig {
             engine_config: config,
             max_queue_size: 1000,
-            backend_settings: backend::BackendSettings::Proxy(backend::ProxySettings {
-                listen_addr,
-                ..Default::default()
-            }),
+            backend_settings: backend::BackendSettings::Proxy(proxy_settings),
         };
 
         let mut backend = backend::ProxyBackend::new();
