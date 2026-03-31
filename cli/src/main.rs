@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use backend::{Backend, BypassProxy, ProxyConfig};
@@ -22,11 +22,19 @@ struct Cli {
     #[arg(long)]
     json_logs: bool,
 
-    #[arg(long, default_value = "/tmp/turkeydpi.sock")]
-    socket: PathBuf,
+    #[arg(long)]
+    socket: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
+}
+
+impl Cli {
+    fn socket_path(&self) -> PathBuf {
+        self.socket
+            .clone()
+            .unwrap_or_else(control::transport::default_socket_path)
+    }
 }
 
 #[derive(Subcommand)]
@@ -109,7 +117,7 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
     info!("Configuration loaded successfully");
 
     let server_config = ServerConfig {
-        socket_path: cli.socket.clone(),
+        socket_path: cli.socket_path(),
         ..Default::default()
     };
 
@@ -126,7 +134,7 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
     server.set_proxy_settings(proxy_settings.clone());
     server.start().await?;
 
-    info!(socket = %cli.socket.display(), "Control server started");
+    info!(socket = %cli.socket_path().display(), "Control server started");
 
     if proxy {
         info!(listen = %listen, "Starting proxy backend");
@@ -160,47 +168,47 @@ async fn run_daemon(cli: &Cli, proxy: bool, listen: &str) -> Result<()> {
     Ok(())
 }
 
-async fn send_command<F, T>(socket: &PathBuf, action: F) -> Result<T>
-where
-    F: FnOnce(
-        &mut ControlClient,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = control::Result<T>> + Send + '_>,
-    >,
-{
-    let mut client = ControlClient::new(socket);
-    action(&mut client)
-        .await
-        .with_context(|| format!("Failed to connect to {}", socket.display()))
-}
-
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum IspPreset {
-    /// TT - s @ 2 bit
+    #[value(help = "Turk Telekom: split at byte 2 and inside the SNI")]
     TurkTelekom,
-    /// VODOFONE - s @ 3 bit
+    #[value(help = "Vodafone TR: split at byte 3, inside the SNI, 100us delay")]
     Vodafone,
-    /// SUPONLINE - s @ 4 bit
+    #[value(help = "Superonline: split at byte 1 and inside the SNI")]
     Superonline,
-    /// AGG
+    #[value(help = "Smallest segments, two header splits, 10ms delay")]
     Aggressive,
+    #[value(help = "Forward untouched, for comparison")]
+    None,
 }
 
 impl IspPreset {
-    fn to_bypass_config(&self) -> BypassConfig {
+    fn name(&self) -> &'static str {
         match self {
-            IspPreset::TurkTelekom => BypassConfig::turk_telekom(),
-            IspPreset::Vodafone => BypassConfig::vodafone_tr(),
-            IspPreset::Superonline => BypassConfig::superonline(),
-            IspPreset::Aggressive => BypassConfig::aggressive(),
+            IspPreset::TurkTelekom => "turk-telekom",
+            IspPreset::Vodafone => "vodafone",
+            IspPreset::Superonline => "superonline",
+            IspPreset::Aggressive => "aggressive",
+            IspPreset::None => "none",
         }
+    }
+
+    fn to_bypass_config(self) -> BypassConfig {
+        BypassConfig::preset(self.name()).unwrap_or_default()
     }
 }
 
 async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<()> {
-    let listen_addr = listen
+    let listen_addr: std::net::SocketAddr = listen
         .parse()
         .with_context(|| format!("Invalid listen address: {}", listen))?;
+
+    if !listen_addr.ip().is_loopback() {
+        warn!(
+            addr = %listen_addr,
+            "listening outside loopback, this proxy has no authentication"
+        );
+    }
 
     let config = ProxyConfig {
         listen_addr,
@@ -245,19 +253,19 @@ async fn main() -> Result<()> {
         }
 
         Commands::Start => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             client.start().await?;
             println!("Engine started");
         }
 
         Commands::Stop => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             client.stop().await?;
             println!("Engine stopped");
         }
 
         Commands::Status => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             let status = client.status().await?;
 
             println!("Status:");
@@ -279,7 +287,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Health => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             let health = client.health().await?;
 
             println!("Health:");
@@ -294,7 +302,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Stats => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             let response = client.send(control::Command::GetStats).await?;
 
             if let control::ResponseData::Stats(stats) = response.data {
@@ -316,7 +324,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::ResetStats => {
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             client.send(control::Command::ResetStats).await?;
             println!("Statistics reset");
         }
@@ -335,7 +343,7 @@ async fn main() -> Result<()> {
             let new_config = Config::load_from_file(config)
                 .with_context(|| format!("Failed to load config from {}", config.display()))?;
 
-            let mut client = ControlClient::new(&cli.socket);
+            let mut client = ControlClient::new(cli.socket_path());
             client.send(control::Command::Reload(new_config)).await?;
             println!("Configuration reloaded");
         }
