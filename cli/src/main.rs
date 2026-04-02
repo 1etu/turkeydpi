@@ -39,6 +39,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Run the HTTP proxy that fragments TLS and HTTP requests")]
     Bypass {
         #[arg(short, long, default_value = "127.0.0.1:8844")]
         listen: String,
@@ -50,6 +51,7 @@ enum Commands {
         verbose: bool,
     },
 
+    #[command(about = "Run the control daemon, optionally with the SOCKS5 proxy")]
     Run {
         #[arg(long)]
         proxy: bool,
@@ -58,20 +60,37 @@ enum Commands {
         listen: String,
     },
 
+    #[command(about = "Start the proxy in a running daemon")]
     Start,
+
+    #[command(about = "Stop the proxy in a running daemon")]
     Stop,
+
+    #[command(about = "Show daemon status")]
     Status,
+
+    #[command(about = "Show daemon health and version")]
     Health,
+
+    #[command(about = "Show traffic counters")]
     Stats,
+
+    #[command(about = "Reset traffic counters")]
     ResetStats,
+
+    #[command(about = "Check a config file without starting anything")]
     Validate {
         #[arg(value_name = "FILE")]
         config: PathBuf,
     },
+
+    #[command(about = "Push a config file into a running daemon")]
     Reload {
         #[arg(value_name = "FILE")]
         config: PathBuf,
     },
+
+    #[command(about = "Print a starting config file")]
     GenConfig {
         #[arg(long, default_value = "toml")]
         format: String,
