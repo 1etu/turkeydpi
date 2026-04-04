@@ -115,40 +115,23 @@ impl BypassProxy {
         let listener = TcpListener::bind(self.config.listen_addr).await?;
         let local_addr = listener.local_addr()?;
 
-        println!("╔══════════════════════════════════════════════════════════════╗");
-        println!("║            TurkeyDPI -  Bypass Proxy Started                 ║");
-        println!("╠══════════════════════════════════════════════════════════════╣");
+        let on_off = |enabled: bool| if enabled { "on" } else { "off" };
+
+        println!("TurkeyDPI bypass proxy");
+        println!("  listening      http://{}", local_addr);
         println!(
-            "║  Listening on: {:<46} ║",
-            format!("http://{}", local_addr)
+            "  sni split      {}",
+            on_off(self.config.bypass.fragment_sni)
         );
         println!(
-            "║  SNI Fragmentation: {:<41} ║",
-            if self.config.bypass.fragment_sni {
-                "ENABLED ✓"
-            } else {
-                "disabled"
-            }
+            "  host split     {}",
+            on_off(self.config.bypass.fragment_http_host)
         );
-        println!(
-            "║  HTTP Host Fragmentation: {:<35} ║",
-            if self.config.bypass.fragment_http_host {
-                "ENABLED ✓"
-            } else {
-                "disabled"
-            }
-        );
-        println!(
-            "║  DNS-over-HTTPS: {:<44} ║",
-            "ENABLED ✓ (bypasses DNS blocking)"
-        );
-        println!("╠══════════════════════════════════════════════════════════════╣");
-        println!(
-            "║  Configure your browser HTTP proxy to: {:<21} ║",
-            local_addr
-        );
-        println!("║  Press Ctrl+C to stop                                        ║");
-        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!("  dns-over-https on");
+        println!("  max clients    {}", self.config.max_connections);
+        println!();
+        println!("Set the system or browser HTTP proxy to {}", local_addr);
+        println!("Press Ctrl+C to stop");
         println!();
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
