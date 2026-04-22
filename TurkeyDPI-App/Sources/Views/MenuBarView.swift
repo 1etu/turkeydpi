@@ -2,7 +2,8 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
-    
+    @State private var launchAtLogin = LoginItem.isEnabled
+
     var body: some View {
         VStack(spacing: 0) {
             if appState.containers.isEmpty {
@@ -23,7 +24,21 @@ struct MenuBarView: View {
             }
             
             Divider()
-            
+
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 11))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .onChange(of: launchAtLogin) { _, newValue in
+                    if !LoginItem.setEnabled(newValue) {
+                        launchAtLogin = LoginItem.isEnabled
+                    }
+                }
+
+            Divider()
+                .padding(.top, 8)
+
             HStack {
                 Button("Open") {
                     NSApp.activate(ignoringOtherApps: true)
