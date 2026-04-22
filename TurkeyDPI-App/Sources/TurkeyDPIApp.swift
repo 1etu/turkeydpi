@@ -11,6 +11,9 @@ struct TurkeyDPIApp: App {
             ContentView()
                 .environmentObject(appState)
                 .frame(minWidth: 800, minHeight: 500)
+                .task {
+                    await appState.startAutoStartContainers()
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {

@@ -18,6 +18,14 @@ class AppState: ObservableObject {
     init() {
         loadContainers()
     }
+
+    func startAutoStartContainers() async {
+        for container in containers where container.config.autoStart {
+            if container.status != .running {
+                await startContainer(container)
+            }
+        }
+    }
     
     func createContainer(config: ContainerConfig) {
         let container = ProxyContainer(config: config)
