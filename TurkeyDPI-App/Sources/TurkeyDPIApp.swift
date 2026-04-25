@@ -34,8 +34,8 @@ struct TurkeyDPIApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        killStale()
-        
+        recoverStrandedProxy()
+
         NSApplication.shared.setActivationPolicy(.regular)
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -56,21 +56,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
-        killStale()
-        
-        Task {
-            await SystemProxy.disableAllProxies()
-        }
+        SystemProxy.disableAllProxiesSync()
+        SystemProxy.clearOwnershipFlag()
     }
-    
-    private func killStale() {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        process.arguments = ["-9", "-f", "turkeydpi-engine"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-        process.waitUntilExit()
+
+    private func recoverStrandedProxy() {
+        guard SystemProxy.hasOwnershipFlag() else { return }
+
+        SystemProxy.disableAllProxiesSync()
+        SystemProxy.clearOwnershipFlag()
     }
     
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
