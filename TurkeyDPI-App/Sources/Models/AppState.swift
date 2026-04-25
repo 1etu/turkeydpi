@@ -147,7 +147,6 @@ class ProxyContainer: ObservableObject, Identifiable {
     @Published var status: ContainerStatus = .stopped
     @Published var logs: [LogEntry] = []
     @Published var connectionCount: Int = 0
-    @Published var bytesTransferred: UInt64 = 0
     
     private var process: Process?
     private var outputPipe: Pipe?
@@ -171,14 +170,14 @@ class ProxyContainer: ObservableObject, Identifiable {
         }
         
         if config.enableSystemProxy {
-            let enabled = await SystemProxy.enableSOCKSProxy(
+            let enabled = await SystemProxy.enableHTTPProxy(
                 host: config.listenAddress,
                 port: String(config.listenPort)
             )
             if enabled {
-                addLog("System SOCKS proxy enabled", type: .info)
+                addLog("System HTTP proxy points here", type: .info)
             } else {
-                addLog("Warning: Could not enable system proxy", type: .warning)
+                addLog("Could not set the system proxy, admin rights are required", type: .warning)
             }
         }
         
@@ -288,7 +287,7 @@ class ProxyContainer: ObservableObject, Identifiable {
             let type: LogEntry.LogType = isError ? .error : parseLogType(from: line)
             addLog(line, type: type)
             
-            if line.contains("New connection") || line.contains("Connection from") {
+            if line.contains("[SNI fragmented]") || line.contains("[Host fragmented]") {
                 connectionCount += 1
             }
         }
