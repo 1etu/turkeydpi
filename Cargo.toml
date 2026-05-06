@@ -5,6 +5,7 @@ members = [
     "backend",
     "control",
     "cli",
+    "sysproxy",
 ]
 
 [workspace.package]
@@ -33,3 +34,4 @@ tempfile = "3"
 engine = { path = "engine" }
 backend = { path = "backend" }
 control = { path = "control" }
+sysproxy = { path = "sysproxy" }
