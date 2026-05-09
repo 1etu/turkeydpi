@@ -90,6 +90,15 @@ enum Commands {
         config: PathBuf,
     },
 
+    #[command(about = "Point the system proxy at a running TurkeyDPI")]
+    SetProxy {
+        #[arg(short, long, default_value = "127.0.0.1:8844")]
+        listen: String,
+    },
+
+    #[command(about = "Clear the system proxy, use this if a crash left you offline")]
+    UnsetProxy,
+
     #[command(about = "Print a starting config file")]
     GenConfig {
         #[arg(long, default_value = "toml")]
@@ -365,6 +374,22 @@ async fn main() -> Result<()> {
             let mut client = ControlClient::new(cli.socket_path());
             client.send(control::Command::Reload(new_config)).await?;
             println!("Configuration reloaded");
+        }
+
+        Commands::SetProxy { listen } => {
+            let addr: std::net::SocketAddr = listen
+                .parse()
+                .with_context(|| format!("Invalid listen address: {}", listen))?;
+
+            sysproxy::enable(&addr.ip().to_string(), addr.port())
+                .context("Failed to set the system proxy")?;
+
+            println!("System proxy set to {}", addr);
+        }
+
+        Commands::UnsetProxy => {
+            sysproxy::disable().context("Failed to clear the system proxy")?;
+            println!("System proxy cleared");
         }
 
         Commands::GenConfig { format, output } => {

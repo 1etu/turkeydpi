@@ -985,6 +985,7 @@ dependencies = [
  "engine",
  "serde",
  "serde_json",
+ "sysproxy",
  "thiserror",
  "tokio",
  "toml",
