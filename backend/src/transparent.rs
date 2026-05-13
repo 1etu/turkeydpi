@@ -68,6 +68,7 @@ pub struct ProxyConfig {
     pub max_connections: usize,
     pub allow_system_dns: bool,
     pub verbose: bool,
+    pub quiet: bool,
 }
 
 impl Default for ProxyConfig {
@@ -80,6 +81,7 @@ impl Default for ProxyConfig {
             max_connections: 512,
             allow_system_dns: false,
             verbose: false,
+            quiet: false,
         }
     }
 }
@@ -115,24 +117,28 @@ impl BypassProxy {
         let listener = TcpListener::bind(self.config.listen_addr).await?;
         let local_addr = listener.local_addr()?;
 
-        let on_off = |enabled: bool| if enabled { "on" } else { "off" };
+        if self.config.quiet {
+            info!(addr = %local_addr, "bypass proxy listening");
+        } else {
+            let on_off = |enabled: bool| if enabled { "on" } else { "off" };
 
-        println!("TurkeyDPI bypass proxy");
-        println!("  listening      http://{}", local_addr);
-        println!(
-            "  sni split      {}",
-            on_off(self.config.bypass.fragment_sni)
-        );
-        println!(
-            "  host split     {}",
-            on_off(self.config.bypass.fragment_http_host)
-        );
-        println!("  dns-over-https on");
-        println!("  max clients    {}", self.config.max_connections);
-        println!();
-        println!("Set the system or browser HTTP proxy to {}", local_addr);
-        println!("Press Ctrl+C to stop");
-        println!();
+            println!("TurkeyDPI bypass proxy");
+            println!("  listening      http://{}", local_addr);
+            println!(
+                "  sni split      {}",
+                on_off(self.config.bypass.fragment_sni)
+            );
+            println!(
+                "  host split     {}",
+                on_off(self.config.bypass.fragment_http_host)
+            );
+            println!("  dns-over-https on");
+            println!("  max clients    {}", self.config.max_connections);
+            println!();
+            println!("Set the system or browser HTTP proxy to {}", local_addr);
+            println!("Press Ctrl+C to stop");
+            println!();
+        }
 
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
@@ -193,7 +199,9 @@ impl BypassProxy {
         }
 
         running.store(false, Ordering::SeqCst);
-        self.stats.print_summary();
+        if !self.config.quiet {
+            self.stats.print_summary();
+        }
         Ok(())
     }
 
