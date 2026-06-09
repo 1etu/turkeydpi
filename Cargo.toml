@@ -6,6 +6,7 @@ members = [
     "control",
     "cli",
     "sysproxy",
+    "windows-app",
 ]
 
 [workspace.package]

@@ -994,6 +994,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "turkeydpi-tray"
+version = "0.1.0"
+dependencies = [
+ "backend",
+ "engine",
+ "sysproxy",
+ "tokio",
+ "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"

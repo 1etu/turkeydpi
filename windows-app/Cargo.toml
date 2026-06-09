@@ -1,0 +1,27 @@
+[package]
+name = "turkeydpi-tray"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "TurkeyDPI Windows tray app"
+
+[[bin]]
+name = "turkeydpi-tray"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+engine = { workspace = true }
+backend = { workspace = true }
+sysproxy = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
