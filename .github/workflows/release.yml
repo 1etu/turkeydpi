@@ -16,76 +16,135 @@ jobs:
         target: [x86_64-apple-darwin, aarch64-apple-darwin]
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      
+
       - name: Build CLI
-        run: cargo build --release --target ${{ matrix.target }}
-      
-      - name: Build macOS App (arm64 only)
-        if: matrix.target == 'aarch64-apple-darwin'
+        run: cargo build --release --target ${{ matrix.target }} -p turkeydpi-cli
+
+      - name: Build app bundle
         run: |
           cd TurkeyDPI-App
-          swift build -c release
-          
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            swift build -c release --arch x86_64
+          else
+            swift build -c release
+          fi
+
           APP="TurkeyDPI.app"
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          
+
           cp ../target/${{ matrix.target }}/release/turkeydpi "$APP/Contents/MacOS/turkeydpi-engine"
           cp .build/release/TurkeyDPI "$APP/Contents/MacOS/"
           cp Resources/Info.plist "$APP/Contents/"
           chmod +x "$APP/Contents/MacOS/"*
-          
-          hdiutil create -volname "TurkeyDPI" -srcfolder "$APP" -ov -format UDZO TurkeyDPI-arm64.dmg
-      
-      - name: Build macOS App (x86_64)
-        if: matrix.target == 'x86_64-apple-darwin'
+
+      - name: Sign and notarize
+        if: ${{ env.MACOS_CERTIFICATE != '' }}
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
         run: |
           cd TurkeyDPI-App
-          swift build -c release --arch x86_64
-          
-          APP="TurkeyDPI.app"
-          rm -rf "$APP"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          
-          cp ../target/${{ matrix.target }}/release/turkeydpi "$APP/Contents/MacOS/turkeydpi-engine"
-          cp .build/release/TurkeyDPI "$APP/Contents/MacOS/"
-          cp Resources/Info.plist "$APP/Contents/"
-          chmod +x "$APP/Contents/MacOS/"*
-          
-          hdiutil create -volname "TurkeyDPI" -srcfolder "$APP" -ov -format UDZO TurkeyDPI-x86_64.dmg
-      
+          echo "$MACOS_CERTIFICATE" | base64 --decode > cert.p12
+          security create-keychain -p runner build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p runner build.keychain
+          security import cert.p12 -k build.keychain -P "$MACOS_CERTIFICATE_PWD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k runner build.keychain
+
+          codesign --force --deep --options runtime --timestamp \
+            --sign "$MACOS_SIGN_IDENTITY" TurkeyDPI.app
+
+          xcrun notarytool submit TurkeyDPI.app --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+          xcrun stapler staple TurkeyDPI.app
+
+      - name: Package
+        run: |
+          cd TurkeyDPI-App
+          SUFFIX=$([ "${{ matrix.target }}" = "x86_64-apple-darwin" ] && echo x86_64 || echo arm64)
+          hdiutil create -volname "TurkeyDPI" -srcfolder TurkeyDPI.app -ov -format UDZO "TurkeyDPI-$SUFFIX.dmg"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.target }}
           path: TurkeyDPI-App/*.dmg
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release -p turkeydpi-cli -p turkeydpi-tray
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/turkeydpi.exe dist/
+          Copy-Item target/release/turkeydpi-tray.exe dist/
+          Copy-Item README.md dist/
+          Copy-Item LICENSE dist/
+          Compress-Archive -Path dist/* -DestinationPath TurkeyDPI-windows-x86_64.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: TurkeyDPI-windows-x86_64.zip
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release -p turkeydpi-cli
+
+      - name: Package
+        run: tar -czf TurkeyDPI-linux-x86_64.tar.gz -C target/release turkeydpi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: TurkeyDPI-linux-x86_64.tar.gz
+
   release:
-    needs: [build-macos]
+    needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Prepare release files
         run: |
           mkdir -p release
-          find artifacts -type f -name "*.dmg" -exec mv {} release/ \;
+          find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.tar.gz" \) -exec mv {} release/ \;
           ls -la release/
-      
+
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*
           generate_release_notes: true
