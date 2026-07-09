@@ -90,6 +90,15 @@ enum Commands {
         config: PathBuf,
     },
 
+    #[command(about = "Test every preset against blocked sites and report what works")]
+    Doctor {
+        #[arg(short, long)]
+        domain: Vec<String>,
+
+        #[arg(long)]
+        json: bool,
+    },
+
     #[command(about = "Point the system proxy at a running TurkeyDPI")]
     SetProxy {
         #[arg(short, long, default_value = "127.0.0.1:8844")]
@@ -226,6 +235,129 @@ impl IspPreset {
     }
 }
 
+async fn run_doctor(domains: &[String], json: bool) -> Result<()> {
+    let resolver = engine::DohResolver::new();
+
+    let targets: Vec<String> = if domains.is_empty() {
+        engine::DEFAULT_TEST_DOMAINS
+            .iter()
+            .map(|d| d.to_string())
+            .collect()
+    } else {
+        domains.to_vec()
+    };
+
+    if !json {
+        println!(
+            "Checking {} against {} sites",
+            engine::CONTROL_DOMAIN,
+            targets.len()
+        );
+    }
+
+    let control = engine::probe_host(
+        &resolver,
+        engine::CONTROL_DOMAIN,
+        &BypassConfig::passthrough(),
+    )
+    .await;
+
+    if !control.is_reachable() && !json {
+        println!("Warning: the control site is unreachable, check your connection");
+    }
+
+    let mut rows = Vec::new();
+    let mut best: Option<(String, usize)> = None;
+
+    let mut presets: Vec<&str> = vec!["none"];
+    presets.extend_from_slice(BypassConfig::preset_names());
+
+    for name in presets {
+        let config = BypassConfig::preset(name).unwrap_or_default();
+        let mut passed = 0;
+        let mut details = Vec::new();
+
+        for host in &targets {
+            let result = engine::probe_host(&resolver, host, &config).await;
+            if result.is_reachable() {
+                passed += 1;
+            }
+            details.push((host.clone(), result.outcome, result.elapsed));
+        }
+
+        if name != "none" {
+            match best {
+                Some((_, count)) if count >= passed => {}
+                _ => best = Some((name.to_string(), passed)),
+            }
+        }
+
+        rows.push((name.to_string(), passed, details));
+    }
+
+    if json {
+        let payload: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|(name, passed, details)| {
+                serde_json::json!({
+                    "preset": name,
+                    "reachable": passed,
+                    "total": targets.len(),
+                    "sites": details
+                        .iter()
+                        .map(|(host, outcome, elapsed)| serde_json::json!({
+                            "host": host,
+                            "outcome": format!("{:?}", outcome),
+                            "ms": elapsed.as_millis(),
+                        }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!();
+    for (name, passed, details) in &rows {
+        let label = if name == "none" {
+            "no bypass".to_string()
+        } else {
+            name.clone()
+        };
+
+        println!("{:<14} {}/{}", label, passed, targets.len());
+
+        for (host, outcome, elapsed) in details {
+            let mark = if *outcome == engine::ProbeOutcome::Reachable {
+                "ok"
+            } else {
+                "--"
+            };
+            println!(
+                "  {:<3} {:<24} {:?} ({} ms)",
+                mark,
+                host,
+                outcome,
+                elapsed.as_millis()
+            );
+        }
+        println!();
+    }
+
+    match best {
+        Some((name, passed)) if passed > 0 => {
+            println!("Use: turkeydpi bypass --preset {}", name);
+        }
+        _ => {
+            println!("No preset got through. Your ISP may need a different strategy.");
+        }
+    }
+
+    Ok(())
+}
+
 async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<()> {
     let listen_addr: std::net::SocketAddr = listen
         .parse()
@@ -257,7 +389,7 @@ async fn main() -> Result<()> {
 
     if !matches!(
         cli.command,
-        Commands::GenConfig { .. } | Commands::Bypass { .. }
+        Commands::GenConfig { .. } | Commands::Bypass { .. } | Commands::Doctor { .. }
     ) {
         setup_logging(&cli.log_level, cli.json_logs)?;
     }
@@ -374,6 +506,10 @@ async fn main() -> Result<()> {
             let mut client = ControlClient::new(cli.socket_path());
             client.send(control::Command::Reload(new_config)).await?;
             println!("Configuration reloaded");
+        }
+
+        Commands::Doctor { domain, json } => {
+            run_doctor(domain, *json).await?;
         }
 
         Commands::SetProxy { listen } => {
