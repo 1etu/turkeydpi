@@ -10,7 +10,7 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use engine::{BypassConfig, BypassEngine, BypassResult, DetectedProtocol, DohResolver};
+use engine::{BypassConfig, BypassEngine, BypassResult, DetectedProtocol, DohResolver, DomainList};
 
 #[derive(Debug, Default)]
 pub struct ProxyStats {
@@ -67,8 +67,18 @@ pub struct ProxyConfig {
     pub buffer_size: usize,
     pub max_connections: usize,
     pub allow_system_dns: bool,
+    pub domains: Option<Arc<DomainList>>,
     pub verbose: bool,
     pub quiet: bool,
+}
+
+impl ProxyConfig {
+    fn bypass_for(&self, host: &str) -> BypassConfig {
+        match &self.domains {
+            Some(list) if !list.matches(host) => BypassConfig::passthrough(),
+            _ => self.bypass.clone(),
+        }
+    }
 }
 
 impl Default for ProxyConfig {
@@ -80,6 +90,7 @@ impl Default for ProxyConfig {
             buffer_size: 32768,
             max_connections: 512,
             allow_system_dns: false,
+            domains: None,
             verbose: false,
             quiet: false,
         }
@@ -286,7 +297,8 @@ async fn handle_connect(
         Err(e) => return Err(e),
     };
 
-    let engine = BypassEngine::new(config.bypass.clone());
+    let host = target.split(':').next().unwrap_or(&target);
+    let engine = BypassEngine::new(config.bypass_for(host));
     let result = engine.process_outgoing(&initial_buf[..initial_len]);
 
     match result.protocol {
@@ -538,7 +550,8 @@ async fn handle_http_forward(
 
     let _ = remote.set_nodelay(true);
 
-    let engine = BypassEngine::new(config.bypass.clone());
+    let host = target.split(':').next().unwrap_or(&target);
+    let engine = BypassEngine::new(config.bypass_for(host));
     let result = engine.process_outgoing(&rewritten_request);
 
     if let Some(ref host) = result.hostname {

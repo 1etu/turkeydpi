@@ -47,6 +47,9 @@ enum Commands {
         #[arg(short, long, default_value = "aggressive")]
         preset: IspPreset,
 
+        #[arg(long, value_name = "FILE")]
+        domains: Option<PathBuf>,
+
         #[arg(short, long)]
         verbose: bool,
     },
@@ -358,7 +361,12 @@ async fn run_doctor(domains: &[String], json: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<()> {
+async fn run_bypass(
+    listen: &str,
+    preset: &IspPreset,
+    domains: Option<&PathBuf>,
+    verbose: bool,
+) -> Result<()> {
     let listen_addr: std::net::SocketAddr = listen
         .parse()
         .with_context(|| format!("Invalid listen address: {}", listen))?;
@@ -370,9 +378,24 @@ async fn run_bypass(listen: &str, preset: &IspPreset, verbose: bool) -> Result<(
         );
     }
 
+    let domain_list = match domains {
+        Some(path) => {
+            let list = engine::DomainList::load(path)
+                .with_context(|| format!("Failed to read {}", path.display()))?;
+            println!(
+                "Fragmenting only the {} domains in {}",
+                list.len(),
+                path.display()
+            );
+            Some(std::sync::Arc::new(list))
+        }
+        None => None,
+    };
+
     let config = ProxyConfig {
         listen_addr,
         bypass: preset.to_bypass_config(),
+        domains: domain_list,
         verbose,
         ..Default::default()
     };
@@ -398,6 +421,7 @@ async fn main() -> Result<()> {
         Commands::Bypass {
             listen,
             preset,
+            domains,
             verbose,
         } => {
             if *verbose {
@@ -405,7 +429,7 @@ async fn main() -> Result<()> {
             } else {
                 setup_logging("info", cli.json_logs)?;
             }
-            run_bypass(listen, preset, *verbose).await?;
+            run_bypass(listen, preset, domains.as_ref(), *verbose).await?;
         }
 
         Commands::Run { proxy, listen } => {
