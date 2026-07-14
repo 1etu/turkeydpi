@@ -13,7 +13,7 @@ pub mod transform;
 pub use bypass::{BypassConfig, BypassEngine, BypassResult, DetectedProtocol};
 pub use config::Config;
 pub use dns::DohResolver;
-pub use domains::{CONTROL_DOMAIN, DEFAULT_TEST_DOMAINS};
+pub use domains::{DomainList, CONTROL_DOMAIN, DEFAULT_TEST_DOMAINS};
 pub use error::{EngineError, Result};
 pub use flow::{FlowContext, FlowKey, FlowState};
 pub use pipeline::Pipeline;
