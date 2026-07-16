@@ -1,0 +1,21 @@
+# Domains to fragment. Everything not listed here is forwarded untouched,
+# which keeps the rest of your browsing at full speed.
+#
+# discord.com      matches discord.com and every subdomain
+# =discord.com     matches discord.com only
+# *.discord.com    same as discord.com
+
+discord.com
+discordapp.com
+discordapp.net
+discord.gg
+
+x.com
+twitter.com
+twimg.com
+
+soundcloud.com
+sndcdn.com
+
+wikipedia.org
+wikimedia.org
