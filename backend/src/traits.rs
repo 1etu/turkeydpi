@@ -60,34 +60,14 @@ impl Default for BackendConfig {
         Self {
             engine_config: Config::default(),
             max_queue_size: 1000,
-            backend_settings: BackendSettings::Tun(TunSettings::default()),
+            backend_settings: BackendSettings::Proxy(ProxySettings::default()),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum BackendSettings {
-    Tun(TunSettings),
     Proxy(ProxySettings),
-}
-
-#[derive(Debug, Clone)]
-pub struct TunSettings {
-    pub device_name: Option<String>,
-    pub mtu: u16,
-    pub address: String,
-    pub netmask: String,
-}
-
-impl Default for TunSettings {
-    fn default() -> Self {
-        Self {
-            device_name: None,
-            mtu: 1500,
-            address: "10.0.85.1".to_string(),
-            netmask: "255.255.255.0".to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -163,10 +143,6 @@ mod tests {
 
     #[test]
     fn test_default_configs() {
-        let tun = TunSettings::default();
-        assert_eq!(tun.mtu, 1500);
-        assert_eq!(tun.address, "10.0.85.1");
-
         let proxy = ProxySettings::default();
         assert!(proxy.bypass.fragment_sni);
         assert_eq!(proxy.max_connections, 512);

@@ -7,9 +7,6 @@ pub enum BackendError {
     #[error("Backend not supported on this platform: {0}")]
     NotSupported(String),
 
-    #[error("Failed to create TUN device: {0}")]
-    TunCreationFailed(String),
-
     #[error("Failed to configure network: {0}")]
     NetworkConfig(String),
 

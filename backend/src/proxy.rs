@@ -261,14 +261,7 @@ impl Backend for ProxyBackend {
             return Err(BackendError::AlreadyRunning);
         }
 
-        let proxy_settings = match config.backend_settings {
-            BackendSettings::Proxy(settings) => settings,
-            _ => {
-                return Err(BackendError::NotSupported(
-                    "ProxyBackend requires ProxySettings".to_string(),
-                ))
-            }
-        };
+        let BackendSettings::Proxy(proxy_settings) = config.backend_settings;
 
         info!(addr = %proxy_settings.listen_addr, "Starting SOCKS5 backend");
 
