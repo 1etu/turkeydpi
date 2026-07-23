@@ -97,6 +97,13 @@ impl Default for ProxyConfig {
     }
 }
 
+#[derive(Clone)]
+struct Session {
+    config: ProxyConfig,
+    stats: Arc<ProxyStats>,
+    dns: Arc<DohResolver>,
+}
+
 pub struct BypassProxy {
     config: ProxyConfig,
     stats: Arc<ProxyStats>,
@@ -174,16 +181,19 @@ impl BypassProxy {
                                 }
                             };
 
-                            let config = config.clone();
-                            let stats = stats.clone();
-                            let dns = dns.clone();
+                            let session = Session {
+                                config: config.clone(),
+                                stats: stats.clone(),
+                                dns: dns.clone(),
+                            };
 
                             stats.connections_total.fetch_add(1, Ordering::Relaxed);
                             stats.connections_active.fetch_add(1, Ordering::Relaxed);
 
                             let verbose = config.verbose;
+                            let stats = stats.clone();
                             tokio::spawn(async move {
-                                if let Err(e) = handle_client(stream, peer_addr, config, stats.clone(), dns).await {
+                                if let Err(e) = handle_client(stream, peer_addr, session).await {
                                     if verbose {
                                         debug!("Connection error: {}", e);
                                     }
@@ -226,9 +236,7 @@ impl BypassProxy {
 async fn handle_client(
     mut client: TcpStream,
     peer_addr: SocketAddr,
-    config: ProxyConfig,
-    stats: Arc<ProxyStats>,
-    dns: Arc<DohResolver>,
+    session: Session,
 ) -> io::Result<()> {
     let buf = match read_request_head(&mut client).await? {
         Some(buf) => buf,
@@ -238,14 +246,11 @@ async fn handle_client(
     let request = String::from_utf8_lossy(&buf);
 
     if request.starts_with("CONNECT ") {
-        return handle_connect(client, peer_addr, &request, &buf, config, stats, dns).await;
+        return handle_connect(client, peer_addr, &request, &session).await;
     }
 
     if let Some(target) = extract_http_target(&request) {
-        return handle_http_forward(
-            client, peer_addr, &request, &buf, target, config, stats, dns,
-        )
-        .await;
+        return handle_http_forward(client, peer_addr, &request, &buf, target, &session).await;
     }
 
     client
@@ -258,18 +263,17 @@ async fn handle_connect(
     mut client: TcpStream,
     peer_addr: SocketAddr,
     request: &str,
-    _raw_request: &[u8],
-    config: ProxyConfig,
-    stats: Arc<ProxyStats>,
-    dns: Arc<DohResolver>,
+    session: &Session,
 ) -> io::Result<()> {
+    let config = &session.config;
+    let stats = &session.stats;
     let target = extract_connect_target(request)?;
 
     if config.verbose {
         debug!("{} -> CONNECT {}", peer_addr, target);
     }
 
-    let mut remote = match connect_target(&dns, &target, &config, &stats).await {
+    let mut remote = match connect_target(&target, session).await {
         Ok(stream) => stream,
         Err(e) => {
             let status = if e.kind() == ErrorKind::TimedOut {
@@ -333,19 +337,17 @@ async fn handle_connect(
         stats.bypass_applied.fetch_add(1, Ordering::Relaxed);
     }
 
-    write_fragments(&mut remote, &result, &stats).await?;
+    write_fragments(&mut remote, &result, stats).await?;
 
-    relay_bidirectional(client, remote, stats).await;
+    relay_bidirectional(client, remote, stats.clone()).await;
 
     Ok(())
 }
 
-async fn connect_target(
-    dns: &Arc<DohResolver>,
-    target: &str,
-    config: &ProxyConfig,
-    stats: &Arc<ProxyStats>,
-) -> io::Result<TcpStream> {
+async fn connect_target(target: &str, session: &Session) -> io::Result<TcpStream> {
+    let config = &session.config;
+    let stats = &session.stats;
+    let dns = &session.dns;
     let addrs = match dns.resolve_socket_addrs(target).await {
         Ok(addrs) => {
             stats.dns_queries.fetch_add(1, Ordering::Relaxed);
@@ -524,15 +526,15 @@ async fn handle_http_forward(
     request: &str,
     raw_request: &[u8],
     target: String,
-    config: ProxyConfig,
-    stats: Arc<ProxyStats>,
-    dns: Arc<DohResolver>,
+    session: &Session,
 ) -> io::Result<()> {
+    let config = &session.config;
+    let stats = &session.stats;
     if config.verbose {
         debug!("{} -> HTTP {}", peer_addr, target);
     }
 
-    let mut remote = match connect_target(&dns, &target, &config, &stats).await {
+    let mut remote = match connect_target(&target, session).await {
         Ok(stream) => stream,
         Err(e) => {
             let status = if e.kind() == ErrorKind::TimedOut {
@@ -567,9 +569,9 @@ async fn handle_http_forward(
         stats.bypass_applied.fetch_add(1, Ordering::Relaxed);
     }
 
-    write_fragments(&mut remote, &result, &stats).await?;
+    write_fragments(&mut remote, &result, stats).await?;
 
-    relay_bidirectional(client, remote, stats).await;
+    relay_bidirectional(client, remote, stats.clone()).await;
 
     Ok(())
 }
