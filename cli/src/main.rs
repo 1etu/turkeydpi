@@ -557,7 +557,7 @@ async fn main() -> Result<()> {
 
             let content = match format.as_str() {
                 "json" => serde_json::to_string_pretty(&config)?,
-                "toml" | _ => toml::to_string_pretty(&config)?,
+                _ => toml::to_string_pretty(&config)?,
             };
 
             if let Some(path) = output {

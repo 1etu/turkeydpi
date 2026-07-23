@@ -186,7 +186,7 @@ impl Pipeline {
             .map(CompiledRule::compile)
             .collect::<Result<Vec<_>>>()?;
 
-        compiled.sort_by(|a, b| b.rule.priority.cmp(&a.rule.priority));
+        compiled.sort_by_key(|c| std::cmp::Reverse(c.rule.priority));
 
         Ok(compiled)
     }

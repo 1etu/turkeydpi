@@ -404,8 +404,10 @@ mod tests {
 
     #[test]
     fn test_flow_cache_lru_eviction() {
-        let mut limits = Limits::default();
-        limits.max_flows = 2;
+        let limits = Limits {
+            max_flows: 2,
+            ..Default::default()
+        };
         let cache = FlowCache::new(&limits);
 
         let key1 = FlowKey::new(

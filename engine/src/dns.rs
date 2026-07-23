@@ -310,12 +310,7 @@ fn dechunk(body: &str) -> String {
     let mut out = String::new();
     let mut rest = body;
 
-    loop {
-        let line_end = match rest.find("\r\n") {
-            Some(pos) => pos,
-            None => break,
-        };
-
+    while let Some(line_end) = rest.find("\r\n") {
         let size = match usize::from_str_radix(rest[..line_end].trim(), 16) {
             Ok(size) => size,
             Err(_) => return body.to_string(),

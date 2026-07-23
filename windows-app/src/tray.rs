@@ -166,13 +166,13 @@ unsafe fn notify_data(snap: &Snapshot) -> NOTIFYICONDATAW {
 }
 
 unsafe fn add_tray_icon(snap: &Snapshot) {
-    let mut data = notify_data(snap);
-    Shell_NotifyIconW(NIM_ADD, &mut data);
+    let data = notify_data(snap);
+    Shell_NotifyIconW(NIM_ADD, &data);
 }
 
 unsafe fn update_tray_icon(snap: &Snapshot) {
-    let mut data = notify_data(snap);
-    Shell_NotifyIconW(NIM_MODIFY, &mut data);
+    let data = notify_data(snap);
+    Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
 unsafe fn remove_tray_icon(snap: &Snapshot) {
@@ -180,7 +180,7 @@ unsafe fn remove_tray_icon(snap: &Snapshot) {
     data.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
     data.hWnd = snap.hwnd;
     data.uID = 1;
-    Shell_NotifyIconW(NIM_DELETE, &mut data);
+    Shell_NotifyIconW(NIM_DELETE, &data);
 }
 
 unsafe fn show_menu(snap: &Snapshot) {
