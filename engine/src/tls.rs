@@ -349,4 +349,77 @@ mod tests {
         assert_eq!(&fragments[1][..], b", ");
         assert_eq!(&fragments[2][..], b"World!");
     }
+
+    fn scramble(seed: u64, data: &mut [u8]) {
+        let mut state = seed | 1;
+        for byte in data.iter_mut() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            if state % 5 == 0 {
+                *byte = (state >> 24) as u8;
+            }
+        }
+    }
+
+    #[test]
+    fn test_parser_survives_truncation() {
+        let full = sample_client_hello();
+
+        for len in 0..=full.len() {
+            let slice = &full[..len];
+            let _ = is_client_hello(slice);
+            let _ = parse_client_hello(slice);
+            let _ = find_http_host(slice);
+        }
+    }
+
+    #[test]
+    fn test_parser_survives_mutation() {
+        let full = sample_client_hello();
+
+        for seed in 0..2000u64 {
+            let mut data = full.clone();
+            scramble(seed, &mut data);
+
+            let _ = is_client_hello(&data);
+            let _ = parse_client_hello(&data);
+
+            let cut = (seed as usize) % (data.len() + 1);
+            let _ = parse_client_hello(&data[..cut]);
+        }
+    }
+
+    #[test]
+    fn test_parser_survives_arbitrary_bytes() {
+        for seed in 0..2000u64 {
+            let len = (seed as usize) % 300;
+            let mut data = vec![0u8; len];
+            scramble(seed.wrapping_mul(2654435761), &mut data);
+
+            if len > 5 {
+                data[0] = TLS_HANDSHAKE;
+                data[1] = 0x03;
+                data[2] = 0x03;
+                data[5] = HANDSHAKE_CLIENT_HELLO;
+            }
+
+            let _ = parse_client_hello(&data);
+        }
+    }
+
+    #[test]
+    fn test_sni_offset_stays_in_bounds() {
+        let full = sample_client_hello();
+
+        for len in 0..=full.len() {
+            if let Some(info) = parse_client_hello(&full[..len]) {
+                if let (Some(offset), Some(sni_len)) = (info.sni_offset, info.sni_length) {
+                    if info.sni_hostname.is_some() {
+                        assert!(offset + sni_len <= len);
+                    }
+                }
+            }
+        }
+    }
 }
