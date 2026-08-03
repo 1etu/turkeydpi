@@ -1,6 +1,38 @@
 # TurkeyDPI
 
-DPI bypass for Turkish ISPs. Fragments TLS/HTTP packets to evade SNI-based blocking.
+DPI bypass for Turkish ISPs. Splits TLS and HTTP requests across TCP segments so the
+middlebox never sees a complete hostname, and resolves names over DNS-over-HTTPS so the
+ISP resolver cannot lie to you.
+
+macOS, Windows and Linux. [Türkçe](README.tr.md)
+
+## Quick start
+
+Find the preset that works on your connection:
+
+```bash
+turkeydpi doctor
+```
+
+It tries every preset against a handful of commonly blocked sites and tells you which one
+got through. Then run it:
+
+```bash
+turkeydpi bypass --preset turk-telekom
+```
+
+Listens on `127.0.0.1:8844`. Point your system or browser HTTP proxy there, or let
+TurkeyDPI do it:
+
+```bash
+turkeydpi set-proxy
+```
+
+If a crash ever leaves your machine pointing at a proxy that is not running:
+
+```bash
+turkeydpi unset-proxy
+```
 
 ## Install
 
@@ -8,170 +40,121 @@ DPI bypass for Turkish ISPs. Fragments TLS/HTTP packets to evade SNI-based block
 cargo install --path cli
 ```
 
-## Usage
+Prebuilt binaries for macOS, Windows and Linux are attached to each
+[release](https://github.com/1etu/turkeydpi/releases).
+
+## Apps
+
+**Windows** — `turkeydpi-tray.exe` is a tray icon and nothing else. Right click it to turn
+the proxy on or off, pick a preset, or quit. Turning it on also points the Windows system
+proxy at it; turning it off or quitting puts the setting back.
+
+**macOS** — `cd TurkeyDPI-App && ./build.sh`, then open `TurkeyDPI.app`. Menu bar app with
+per-container control, live logs and a launch-at-login toggle.
+
+## Presets
+
+| Preset | What it does |
+| --- | --- |
+| `turk-telekom` | Split at byte 2 and inside the hostname |
+| `vodafone` | Split at byte 3 and inside the hostname, 100µs between segments |
+| `superonline` | Split at byte 1 and inside the hostname |
+| `aggressive` | Two header splits, 5-byte segments, 10ms between segments |
+| `none` | Forward untouched, useful as a control |
+
+Every preset splits *inside* the hostname. They differ in where else they cut and how
+slowly they send.
+
+## Only fragment what you have to
+
+Fragmentation costs round trips. If you only need it for a handful of sites, list them:
 
 ```bash
-turkeydpi bypass -v
+turkeydpi bypass --domains domains.example.txt
 ```
 
-Listens on `127.0.0.1:8844`. Set system HTTP/HTTPS proxy to this address.
-
-### Presets
-
-```bash
-turkeydpi bypass --preset aggressive    # recommended
-turkeydpi bypass --preset turk-telekom
-turkeydpi bypass --preset vodafone
-turkeydpi bypass --preset superonline
-```
-
-## macOS App
-
-```bash
-cd TurkeyDPI-App && ./build.sh
-open TurkeyDPI.app
-```
-
-Native menu bar app with one-click proxy toggle.
+Anything not on the list is forwarded untouched at full speed. `discord.com` covers its
+subdomains too; prefix a line with `=` to match one exact host.
 
 ## How it works
 
-### The Problem
-
-Turkish ISPs inspect your traffic using Deep Packet Inspection (DPI). When you connect to the blocked websites (for ex: `discord.com`), the TLS handshake looks like this:
-
-```
-Client → Server: TLS ClientHello
-  ├─ TLS Record Header: 16 03 03 [length]
-  ├─ Handshake Type: 01 (ClientHello)
-  ├─ Version, Random, Session ID...
-  └─ Extensions:
-       └─ SNI (type 0x0000): "discord.com"  ← DPI reads this
-```
-
-The DPI box sees `discord.com` in plaintext, matches it against a blocklist, and kills the connection.
-
-### The Solution
-
-TCP is a stream protocol. The server doesn't care if data arrives in one packet or twenty—it reassembles everything. But DPI boxes are stateless and inspect packets individually.
-
-We exploit this:
+Turkish ISPs inspect the TLS handshake. When you connect to a blocked site, the
+ClientHello carries the hostname in plaintext:
 
 ```
-Normal:     [TLS Header + ClientHello + SNI "discord.com"] → DPI blocks
-
-Fragmented: [TLS Hea] [der + Cli] [entHello] [+ SNI "dis] [cord.com"]
-                ↓
-            DPI sees 5 incomplete packets, can't extract SNI
-                ↓
-            Server reassembles → valid TLS handshake
+Client -> Server: TLS ClientHello
+  Record header:  16 03 03 [length]
+  Handshake type: 01 (ClientHello)
+  Extensions:
+    SNI (0x0000): "discord.com"    <- the DPI box reads this
 ```
 
-### TLS Record Structure
+It matches that against a blocklist and kills the connection.
+
+TCP is a stream. The server does not care whether your data arrives in one segment or
+twenty, because it reassembles before parsing. Many DPI boxes do care: they inspect
+segments individually and give up when the hostname is cut in half.
 
 ```
-Byte:   0      1-2     3-4      5+
-      ┌────┬────────┬────────┬─────────────────────┐
-      │ 16 │ 03 03  │ length │ Handshake data...   │
-      └────┴────────┴────────┴─────────────────────┘
-        │      │        │
-        │      │        └─ 2 bytes: record length
-        │      └─ TLS version (0x0303 = TLS 1.2)
-        └─ Content type (0x16 = Handshake)
+Normal:      [16 03 03 .. 01 .. "discord.com" ..]     one segment, blocked
+
+Fragmented:  [16 03] [03 .. 01 .. "disc"] ["ord.com" ..]
+                 |                    |
+                 |                    hostname split across segments
+                 record header cut before the handshake type
 ```
 
-The SNI extension sits inside the handshake data, typically 40-200 bytes in. We parse the ClientHello to find the exact byte offset of the hostname.
+The server reassembles and completes the handshake normally.
 
-### Fragment Strategy
+The same idea applies to plaintext HTTP, where the hostname sits in the `Host:` header,
+and the request is split inside that value.
 
-Split point matters. Turkish DPI specifically looks for:
-1. Content type `0x16` (handshake)
-2. Handshake type `0x01` (ClientHello)
-3. SNI extension with readable hostname
+### DNS
 
-We split *before* the handshake type is visible:
+ISPs also poison DNS. TurkeyDPI resolves over DNS-over-HTTPS (Cloudflare, Quad9, Google,
+in that order), honours the TTL the resolver returns, and tries every address it gets back
+before giving up. It does **not** fall back to the system resolver, because that is the
+thing being poisoned.
 
-```
-Original:  [16] [03 03] [00 xx] [01 00 00 ... SNI ...]
-                                 ↑
-                                 Handshake type
+## Configuration
 
-Split:     [16 03] [03 00 xx 01 00 ... SNI ...]
-               ↑
-               DPI never sees complete record header
-```
+Most people never need a config file. If you want one:
 
-Or split the SNI hostname itself:
-
-```
-SNI field: [...] [00 0b] "discord.com" [...]
-                          ↓
-Split:     [...] [00 0b] "disc" | "ord.com" [...]
+```bash
+turkeydpi gen-config > turkeydpi.toml
+turkeydpi validate turkeydpi.toml
 ```
 
-### HTTP Host Header
+Unknown keys are rejected rather than silently ignored. See
+[config.example.toml](config.example.toml).
 
-Same principle for HTTP:
+## What this does not do
 
-```
-GET / HTTP/1.1
-Host: twitter.com    ← DPI reads this
-Connection: close
-```
+- It is **not** a VPN and **not** anonymity software. Your ISP still sees every address
+  you connect to.
+- It does not encrypt anything that was not already encrypted.
+- It does not help against blocking done by IP address, only by hostname inspection.
+- It offers no protection against an ISP that actively probes or fingerprints you.
 
-Fragment within the Host value:
+See [SECURITY.md](SECURITY.md).
 
-```
-GET / HTTP/1.1
-Host: twit  →  [first packet]
-ter.com     →  [second packet]
-Connection: close
-```
-
-### DNS Bypass
-
-ISPs also poison DNS. We use DNS-over-HTTPS (DoH) to Cloudflare:
+## Layout
 
 ```
-Normal:    DNS query for discord.com → ISP returns fake IP
-With DoH:  HTTPS POST to 1.1.1.1/dns-query → encrypted → real IP
+cli/           turkeydpi binary
+engine/        hostname parsing, split strategies, DoH, reachability probe
+backend/       HTTP CONNECT proxy and SOCKS5 proxy
+control/       daemon IPC
+sysproxy/      system proxy settings per platform
+windows-app/   Windows tray app
+TurkeyDPI-App/ macOS menu bar app
 ```
-
-### Timing
-
-Some DPI boxes buffer packets briefly hoping to reassemble. Adding 10-50ms delay between fragments defeats this:
-
-```
-[fragment 1] ──────────────────────────────→
-                    wait 10ms
-             [fragment 2] ────────────────→
-                    wait 10ms
-                          [fragment 3] ──→
-```
-
-The DPI buffer expires before reassembly completes.
-
-### Techniques
-
-- **SNI fragmentation**: Split TLS ClientHello across TCP segments
-- **Host header fragmentation**: Split HTTP Host header
-- **Segment size control**: Force small MSS via socket options
-- **Timing jitter**: Delays between fragments
-- **DoH**: Encrypted DNS resolution
 
 ## Build
 
 ```bash
 cargo build --release
-```
-
-## Structure
-
-```
-cli/        CLI binary
-engine/     Bypass logic, transforms
-backend/    Proxy server, TUN (wip)
-control/    Daemon IPC
+cargo test --workspace
 ```
 
 ## License
