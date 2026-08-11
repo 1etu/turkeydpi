@@ -356,7 +356,7 @@ mod tests {
             state ^= state << 13;
             state ^= state >> 7;
             state ^= state << 17;
-            if state % 5 == 0 {
+            if state.is_multiple_of(5) {
                 *byte = (state >> 24) as u8;
             }
         }
