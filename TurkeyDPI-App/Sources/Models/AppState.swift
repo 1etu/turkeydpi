@@ -105,10 +105,10 @@ enum ISPPreset: String, Codable, CaseIterable, Identifiable {
     
     var description: String {
         switch self {
-        case .turkTelekom: return "Split at byte 2"
-        case .vodafone: return "Split at byte 3 with delay"
-        case .superonline: return "Split at byte 1"
-        case .aggressive: return "All techniques enabled"
+        case .turkTelekom: return "Split at byte 2 and inside the hostname"
+        case .vodafone: return "Split at byte 3 and inside the hostname, with delay"
+        case .superonline: return "Split at byte 1 and inside the hostname"
+        case .aggressive: return "Two header splits, smallest segments, 10ms delay"
         }
     }
 }
@@ -243,11 +243,9 @@ class ProxyContainer: ObservableObject, Identifiable {
             addLog("System proxies disabled", type: .info)
         }
         
-        // Force kill the process
         if let proc = process {
             proc.terminate()
             
-            // Give it a moment, then force kill if needed
             try? await Task.sleep(nanoseconds: 500_000_000)
             if proc.isRunning {
                 kill(proc.processIdentifier, SIGKILL)
