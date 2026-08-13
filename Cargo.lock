@@ -999,10 +999,15 @@ version = "0.2.0"
 dependencies = [
  "backend",
  "engine",
+ "native-tls",
+ "serde",
+ "serde_json",
  "sysproxy",
  "tokio",
+ "tokio-native-tls",
  "tracing",
  "windows-sys 0.59.0",
+ "winreg",
 ]
 
 [[package]]
