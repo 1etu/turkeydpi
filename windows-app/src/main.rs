@@ -5,6 +5,8 @@ mod icon;
 #[cfg(windows)]
 mod proxy_thread;
 #[cfg(windows)]
+mod paint;
+#[cfg(windows)]
 mod theme;
 #[cfg(windows)]
 mod tray;
