@@ -98,6 +98,9 @@ enum Commands {
         #[arg(short, long)]
         domain: Vec<String>,
 
+        #[arg(short, long, default_value = "4")]
+        trials: usize,
+
         #[arg(long)]
         json: bool,
     },
@@ -238,8 +241,66 @@ impl IspPreset {
     }
 }
 
-async fn run_doctor(domains: &[String], json: bool) -> Result<()> {
+struct PresetScore {
+    name: String,
+    reached: usize,
+    attempts: usize,
+    per_host: Vec<(String, usize, usize)>,
+}
+
+impl PresetScore {
+    fn ratio(&self) -> f64 {
+        if self.attempts == 0 {
+            0.0
+        } else {
+            self.reached as f64 / self.attempts as f64
+        }
+    }
+
+    fn percent(&self) -> u32 {
+        (self.ratio() * 100.0).round() as u32
+    }
+}
+
+async fn score_preset(
+    resolver: &engine::DohResolver,
+    name: &str,
+    targets: &[String],
+    trials: usize,
+) -> PresetScore {
+    let config = BypassConfig::preset(name).unwrap_or_default();
+    let mut per_host = Vec::new();
+    let mut reached = 0;
+    let mut attempts = 0;
+
+    for host in targets {
+        let mut host_ok = 0;
+
+        for _ in 0..trials {
+            if engine::probe_host(resolver, host, &config)
+                .await
+                .is_reachable()
+            {
+                host_ok += 1;
+            }
+        }
+
+        reached += host_ok;
+        attempts += trials;
+        per_host.push((host.clone(), host_ok, trials));
+    }
+
+    PresetScore {
+        name: name.to_string(),
+        reached,
+        attempts,
+        per_host,
+    }
+}
+
+async fn run_doctor(domains: &[String], trials: usize, json: bool) -> Result<()> {
     let resolver = engine::DohResolver::new();
+    let trials = trials.max(1);
 
     let targets: Vec<String> = if domains.is_empty() {
         engine::DEFAULT_TEST_DOMAINS
@@ -252,109 +313,105 @@ async fn run_doctor(domains: &[String], json: bool) -> Result<()> {
 
     if !json {
         println!(
-            "Checking {} against {} sites",
-            engine::CONTROL_DOMAIN,
-            targets.len()
+            "Testing {} sites, {} tries each. This takes a moment.",
+            targets.len(),
+            trials
         );
+        println!();
     }
 
-    let control = engine::probe_host(
-        &resolver,
-        engine::CONTROL_DOMAIN,
-        &BypassConfig::passthrough(),
-    )
-    .await;
+    let mut scores = Vec::new();
+    scores.push(score_preset(&resolver, "none", &targets, trials).await);
 
-    if !control.is_reachable() && !json {
-        println!("Warning: the control site is unreachable, check your connection");
+    for name in BypassConfig::preset_names() {
+        scores.push(score_preset(&resolver, name, &targets, trials).await);
     }
 
-    let mut rows = Vec::new();
-    let mut best: Option<(String, usize)> = None;
+    let baseline = scores[0].ratio();
 
-    let mut presets: Vec<&str> = vec!["none"];
-    presets.extend_from_slice(BypassConfig::preset_names());
-
-    for name in presets {
-        let config = BypassConfig::preset(name).unwrap_or_default();
-        let mut passed = 0;
-        let mut details = Vec::new();
-
-        for host in &targets {
-            let result = engine::probe_host(&resolver, host, &config).await;
-            if result.is_reachable() {
-                passed += 1;
-            }
-            details.push((host.clone(), result.outcome, result.elapsed));
-        }
-
-        if name != "none" {
-            match best {
-                Some((_, count)) if count >= passed => {}
-                _ => best = Some((name.to_string(), passed)),
-            }
-        }
-
-        rows.push((name.to_string(), passed, details));
-    }
+    let best = scores[1..]
+        .iter()
+        .max_by(|a, b| a.ratio().partial_cmp(&b.ratio()).unwrap())
+        .map(|s| (s.name.clone(), s.ratio(), s.percent()));
 
     if json {
-        let payload: Vec<serde_json::Value> = rows
+        let payload: Vec<serde_json::Value> = scores
             .iter()
-            .map(|(name, passed, details)| {
+            .map(|s| {
                 serde_json::json!({
-                    "preset": name,
-                    "reachable": passed,
-                    "total": targets.len(),
-                    "sites": details
+                    "preset": s.name,
+                    "reached": s.reached,
+                    "attempts": s.attempts,
+                    "percent": s.percent(),
+                    "sites": s.per_host
                         .iter()
-                        .map(|(host, outcome, elapsed)| serde_json::json!({
+                        .map(|(host, ok, total)| serde_json::json!({
                             "host": host,
-                            "outcome": format!("{:?}", outcome),
-                            "ms": elapsed.as_millis(),
+                            "reached": ok,
+                            "attempts": total,
                         }))
                         .collect::<Vec<_>>(),
                 })
             })
             .collect();
 
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "trials": trials,
+                "baseline_percent": (baseline * 100.0).round() as u32,
+                "recommended": best.as_ref().map(|(name, ratio, _)| {
+                    if *ratio > baseline + 0.1 { Some(name.clone()) } else { None }
+                }),
+                "results": payload,
+            }))?
+        );
         return Ok(());
     }
 
-    println!();
-    for (name, passed, details) in &rows {
-        let label = if name == "none" {
+    for score in &scores {
+        let label = if score.name == "none" {
             "no bypass".to_string()
         } else {
-            name.clone()
+            score.name.clone()
         };
 
-        println!("{:<14} {}/{}", label, passed, targets.len());
+        println!(
+            "{:<14} {:>3}%   {}/{}",
+            label,
+            score.percent(),
+            score.reached,
+            score.attempts
+        );
 
-        for (host, outcome, elapsed) in details {
-            let mark = if *outcome == engine::ProbeOutcome::Reachable {
-                "ok"
-            } else {
-                "--"
-            };
-            println!(
-                "  {:<3} {:<24} {:?} ({} ms)",
-                mark,
-                host,
-                outcome,
-                elapsed.as_millis()
-            );
+        for (host, ok, total) in &score.per_host {
+            println!("   {:<26} {}/{}", host, ok, total);
         }
         println!();
     }
 
     match best {
-        Some((name, passed)) if passed > 0 => {
-            println!("Use: turkeydpi bypass --preset {}", name);
+        Some((name, ratio, percent)) if ratio > baseline + 0.1 => {
+            println!("Best: {} at {}%", name, percent);
+            println!("Run: turkeydpi bypass --preset {}", name);
+        }
+        Some((_, _, percent)) if baseline >= 0.9 => {
+            println!(
+                "Nothing here looks blocked, {}% got through with no bypass.",
+                (baseline * 100.0).round() as u32
+            );
+            println!(
+                "Best preset only managed {}%, so you do not need one.",
+                percent
+            );
         }
         _ => {
-            println!("No preset got through. Your ISP may need a different strategy.");
+            println!(
+                "No preset beat doing nothing ({}% baseline).",
+                (baseline * 100.0).round() as u32
+            );
+            println!("Either these sites are not blocked for you, or the connection is");
+            println!("too unstable to tell. Try again, or pass your own --domain values.");
         }
     }
 
@@ -532,8 +589,12 @@ async fn main() -> Result<()> {
             println!("Configuration reloaded");
         }
 
-        Commands::Doctor { domain, json } => {
-            run_doctor(domain, *json).await?;
+        Commands::Doctor {
+            domain,
+            trials,
+            json,
+        } => {
+            run_doctor(domain, *trials, *json).await?;
         }
 
         Commands::SetProxy { listen } => {
