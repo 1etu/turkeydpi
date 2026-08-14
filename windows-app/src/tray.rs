@@ -281,7 +281,11 @@ fn finish_setup(index: usize) -> Option<(Snapshot, HICON, SocketAddr, bool)> {
     let mutex = STATE.get()?;
     let mut state = mutex.lock().ok()?;
 
+    let detected = Settings::load().detected_provider;
+
     state.preset = index;
+    state.provider = detected.clone();
+    state.settings.detected_provider = detected;
     state.settings.preset = CHOICES[index].key.to_string();
     state.settings.setup_done = true;
     state.settings.save();

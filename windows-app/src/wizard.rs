@@ -620,10 +620,21 @@ unsafe extern "system" fn wizard_proc(
                     InvalidateRect(hwnd, null(), 0);
                 }
                 Outcome::Commit(preset) => {
-                    let owner = WIZARD.with(|wizard| wizard.borrow().as_ref().map(|s| s.owner));
+                    let info = WIZARD.with(|wizard| {
+                        wizard
+                            .borrow()
+                            .as_ref()
+                            .map(|s| (s.owner, s.provider.clone()))
+                    });
                     let index = CHOICES.iter().position(|c| c.key == preset).unwrap_or(3);
                     DestroyWindow(hwnd);
-                    if let Some(owner) = owner {
+
+                    if let Some((owner, provider)) = info {
+                        if provider.is_some() {
+                            let mut settings = crate::settings::Settings::load();
+                            settings.detected_provider = provider;
+                            settings.save();
+                        }
                         PostMessageW(owner, WIZARD_DONE, index, 0);
                     }
                 }
