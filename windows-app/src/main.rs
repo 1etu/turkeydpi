@@ -3,9 +3,11 @@
 #[cfg(windows)]
 mod icon;
 #[cfg(windows)]
+mod paint;
+#[cfg(windows)]
 mod proxy_thread;
 #[cfg(windows)]
-mod paint;
+mod settings;
 #[cfg(windows)]
 mod theme;
 #[cfg(windows)]
