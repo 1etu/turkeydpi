@@ -4,34 +4,28 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use engine::BypassConfig;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreateMenu, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
-    DestroyMenu, DispatchMessageW, GetCursorPos, GetMessageW, PostMessageW, PostQuitMessage,
-    RegisterClassW, RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, TranslateMessage,
-    HICON, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED, MSG, TPM_BOTTOMALIGN,
-    TPM_RIGHTALIGN, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW, GetMessageW, PostMessageW,
+    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, TranslateMessage, HICON, MSG, WM_APP,
+    WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::icon::make_icon;
+use crate::menu::{
+    self, MenuModel, ACTION_PRESET_BASE, ACTION_QUIT, ACTION_SETUP, ACTION_TOGGLE, MENU_COMMAND,
+};
 use crate::proxy_thread::ProxyThread;
+use crate::settings::Settings;
+use crate::toast;
+use crate::wizard::{self, CHOICES, WIZARD_DONE};
 
 const TRAY_MESSAGE: u32 = WM_APP + 1;
-const ID_TOGGLE: usize = 1;
-const ID_QUIT: usize = 2;
-const ID_PRESET_BASE: usize = 100;
-
-const PRESETS: &[(&str, &str)] = &[
-    ("turk-telekom", "Turk Telekom"),
-    ("vodafone", "Vodafone TR"),
-    ("superonline", "Superonline"),
-    ("aggressive", "Aggressive"),
-];
 
 struct State {
     hwnd: HWND,
@@ -39,8 +33,10 @@ struct State {
     enabled: bool,
     preset: usize,
     listen: SocketAddr,
+    provider: Option<String>,
     proxy: ProxyThread,
     taskbar_created: u32,
+    settings: Settings,
 }
 
 unsafe impl Send for State {}
@@ -82,11 +78,10 @@ pub fn run() {
         class.lpszClassName = class_name.as_ptr();
         RegisterClassW(&class);
 
-        let window_name = wide("TurkeyDPI");
         let hwnd = CreateWindowExW(
             0,
             class_name.as_ptr(),
-            window_name.as_ptr(),
+            wide("TurkeyDPI").as_ptr(),
             0,
             0,
             0,
@@ -105,25 +100,47 @@ pub fn run() {
         let taskbar_created = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         let icon = make_icon(false);
 
+        let settings = Settings::load();
+        let first_run = !settings.setup_done;
+
+        let preset = CHOICES
+            .iter()
+            .position(|choice| choice.key == settings.preset)
+            .unwrap_or(3);
+
+        let listen: SocketAddr = format!("127.0.0.1:{}", settings.listen_port)
+            .parse()
+            .unwrap_or_else(|_| "127.0.0.1:8844".parse().unwrap());
+
         let state = State {
             hwnd,
             icon,
             enabled: false,
-            preset: 3,
-            listen: "127.0.0.1:8844".parse().unwrap(),
+            preset,
+            listen,
+            provider: settings.detected_provider.clone(),
             proxy: ProxyThread::spawn(),
             taskbar_created,
+            settings,
         };
 
         let snap = Snapshot {
             hwnd,
             icon,
             enabled: false,
-            preset: 3,
+            preset,
         };
 
         let _ = STATE.set(Mutex::new(state));
         add_tray_icon(&snap);
+
+        if first_run {
+            toast::show(
+                "TurkeyDPI is running",
+                "It lives in the tray, next to the clock. Click the icon to turn it on or change your provider.",
+            );
+            wizard::show(hwnd, CHOICES[preset].key);
+        }
 
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
@@ -153,7 +170,7 @@ unsafe fn notify_data(snap: &Snapshot) -> NOTIFYICONDATAW {
     data.hIcon = snap.icon;
 
     let tip = if snap.enabled {
-        format!("TurkeyDPI on ({})", PRESETS[snap.preset].1)
+        format!("TurkeyDPI on ({})", CHOICES[snap.preset].name)
     } else {
         "TurkeyDPI off".to_string()
     };
@@ -183,48 +200,25 @@ unsafe fn remove_tray_icon(snap: &Snapshot) {
     Shell_NotifyIconW(NIM_DELETE, &data);
 }
 
-unsafe fn show_menu(snap: &Snapshot) {
-    let menu = CreatePopupMenu();
-    if menu.is_null() {
-        return;
-    }
-
-    let toggle_label = if snap.enabled {
-        wide("Turn off")
-    } else {
-        wide("Turn on")
-    };
-    AppendMenuW(menu, MF_STRING, ID_TOGGLE, toggle_label.as_ptr());
-
-    let presets = CreateMenu();
-    for (index, (_, label)) in PRESETS.iter().enumerate() {
-        let flags = if index == snap.preset {
-            MF_STRING | MF_CHECKED
-        } else {
-            MF_STRING | MF_UNCHECKED
+fn open_menu(hwnd: HWND) {
+    let model = {
+        let state = match STATE.get().and_then(|mutex| mutex.lock().ok()) {
+            Some(state) => state,
+            None => return,
         };
-        AppendMenuW(presets, flags, ID_PRESET_BASE + index, wide(label).as_ptr());
-    }
 
-    AppendMenuW(menu, MF_POPUP, presets as usize, wide("Preset").as_ptr());
-    AppendMenuW(menu, MF_SEPARATOR, 0, null());
-    AppendMenuW(menu, MF_STRING, ID_QUIT, wide("Quit").as_ptr());
+        MenuModel {
+            enabled: state.enabled,
+            preset: state.preset,
+            provider: state.provider.clone(),
+            presets: CHOICES
+                .iter()
+                .map(|choice| (choice.name.to_string(), choice.detail.to_string()))
+                .collect(),
+        }
+    };
 
-    let mut point: POINT = std::mem::zeroed();
-    GetCursorPos(&mut point);
-
-    SetForegroundWindow(snap.hwnd);
-    TrackPopupMenu(
-        menu,
-        TPM_RIGHTALIGN | TPM_BOTTOMALIGN,
-        point.x,
-        point.y,
-        0,
-        snap.hwnd,
-        null(),
-    );
-
-    DestroyMenu(menu);
+    menu::show(hwnd, model);
 }
 
 fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
@@ -234,7 +228,8 @@ fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
     state.enabled = enabled;
 
     if enabled {
-        let bypass = BypassConfig::preset(PRESETS[state.preset].0).unwrap_or_default();
+        let key = CHOICES[state.preset].key;
+        let bypass = BypassConfig::preset(key).unwrap_or_default();
         state.proxy.start(bypass, state.listen);
     } else {
         state.proxy.stop();
@@ -260,9 +255,11 @@ fn apply_preset(index: usize) -> Option<(Snapshot, HICON)> {
     let mut state = mutex.lock().ok()?;
 
     state.preset = index;
+    state.settings.preset = CHOICES[index].key.to_string();
+    state.settings.save();
 
     if state.enabled {
-        let bypass = BypassConfig::preset(PRESETS[index].0).unwrap_or_default();
+        let bypass = BypassConfig::preset(CHOICES[index].key).unwrap_or_default();
         state.proxy.start(bypass, state.listen);
     }
 
@@ -280,9 +277,47 @@ fn apply_preset(index: usize) -> Option<(Snapshot, HICON)> {
     ))
 }
 
-unsafe fn handle_command(id: usize) {
-    match id {
-        ID_TOGGLE => {
+fn finish_setup(index: usize) -> Option<(Snapshot, HICON, SocketAddr, bool)> {
+    let mutex = STATE.get()?;
+    let mut state = mutex.lock().ok()?;
+
+    state.preset = index;
+    state.settings.preset = CHOICES[index].key.to_string();
+    state.settings.setup_done = true;
+    state.settings.save();
+
+    let was_enabled = state.enabled;
+    state.enabled = true;
+
+    let bypass = BypassConfig::preset(CHOICES[index].key).unwrap_or_default();
+    state.proxy.start(bypass, state.listen);
+
+    let old_icon = state.icon;
+    state.icon = make_icon(true);
+
+    Some((
+        Snapshot {
+            hwnd: state.hwnd,
+            icon: state.icon,
+            enabled: true,
+            preset: index,
+        },
+        old_icon,
+        state.listen,
+        was_enabled,
+    ))
+}
+
+unsafe fn refresh(snap: &Snapshot, old_icon: HICON) {
+    update_tray_icon(snap);
+    if !old_icon.is_null() && old_icon != snap.icon {
+        DestroyIcon(old_icon);
+    }
+}
+
+unsafe fn handle_action(action: usize) {
+    match action {
+        ACTION_TOGGLE => {
             let enabled = match snapshot() {
                 Some(snap) => !snap.enabled,
                 None => return,
@@ -299,13 +334,18 @@ unsafe fn handle_command(id: usize) {
                 let _ = sysproxy::disable();
             }
 
-            update_tray_icon(&snap);
-            if !old_icon.is_null() {
-                DestroyIcon(old_icon);
-            }
+            refresh(&snap, old_icon);
         }
 
-        ID_QUIT => {
+        ACTION_SETUP => {
+            let (hwnd, preset) = match snapshot() {
+                Some(snap) => (snap.hwnd, snap.preset),
+                None => return,
+            };
+            wizard::show(hwnd, CHOICES[preset].key);
+        }
+
+        ACTION_QUIT => {
             if let Some(snap) = snapshot() {
                 if snap.enabled {
                     let _ = sysproxy::disable();
@@ -320,15 +360,13 @@ unsafe fn handle_command(id: usize) {
                 }
             }
 
+            toast::dismiss();
             PostQuitMessage(0);
         }
 
-        _ if id >= ID_PRESET_BASE && id < ID_PRESET_BASE + PRESETS.len() => {
-            if let Some((snap, old_icon)) = apply_preset(id - ID_PRESET_BASE) {
-                update_tray_icon(&snap);
-                if !old_icon.is_null() {
-                    DestroyIcon(old_icon);
-                }
+        _ if action >= ACTION_PRESET_BASE && action < ACTION_PRESET_BASE + CHOICES.len() => {
+            if let Some((snap, old_icon)) = apply_preset(action - ACTION_PRESET_BASE) {
+                refresh(&snap, old_icon);
             }
         }
 
@@ -358,20 +396,38 @@ unsafe extern "system" fn window_proc(
         TRAY_MESSAGE => {
             let event = lparam as u32;
             if event == WM_RBUTTONUP || event == WM_LBUTTONUP {
-                if let Some(snap) = snapshot() {
-                    show_menu(&snap);
+                open_menu(hwnd);
+            }
+            0
+        }
+
+        MENU_COMMAND => {
+            PostMessageW(hwnd, WM_APP + 2, wparam, 0);
+            0
+        }
+
+        WIZARD_DONE => {
+            let index = wparam.min(CHOICES.len() - 1);
+
+            if let Some((snap, old_icon, listen, was_enabled)) = finish_setup(index) {
+                let _ = sysproxy::enable(&listen.ip().to_string(), listen.port());
+                refresh(&snap, old_icon);
+
+                if !was_enabled {
+                    toast::show(
+                        "Protection is on",
+                        &format!(
+                            "Using the {} preset. Your browser traffic now goes through TurkeyDPI.",
+                            CHOICES[index].name
+                        ),
+                    );
                 }
             }
             0
         }
 
-        WM_COMMAND => {
-            PostMessageW(hwnd, WM_APP + 2, wparam & 0xFFFF, 0);
-            0
-        }
-
         _ if message == WM_APP + 2 => {
-            handle_command(wparam);
+            handle_action(wparam);
             0
         }
 
