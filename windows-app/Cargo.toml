@@ -22,7 +22,7 @@ sysproxy = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 native-tls = "0.2.14"
 tokio-native-tls = "0.3.1"
-winreg = "0.52"
+winreg = "0.56"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
