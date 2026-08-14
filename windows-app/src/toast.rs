@@ -146,17 +146,10 @@ unsafe fn paint(state: &ToastState, hdc: windows_sys::Win32::Graphics::Gdi::HDC)
     let badge_x = 18;
     let badge_y = (metrics::TOAST_HEIGHT - badge) / 2;
 
-    let tint = if theme.dark { 0.72 } else { 0.86 };
-
-    canvas.fill_rounded(
-        Rect::new(badge_x, badge_y, badge, badge),
-        11.0,
-        theme.accent.mix(theme.surface_raised, tint),
-    );
     canvas.circle(
         (badge_x + badge / 2) as f32,
         (badge_y + badge / 2) as f32,
-        7.0,
+        11.0,
         theme.success,
     );
 
