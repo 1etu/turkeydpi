@@ -236,7 +236,7 @@ pub fn show(owner: HWND, current_preset: &str) {
     }
 }
 
-unsafe fn paint(state: &WizardState) {
+unsafe fn paint(state: &WizardState, hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
     let canvas = match Canvas::new(metrics::WIZARD_WIDTH, metrics::WIZARD_HEIGHT) {
         Some(canvas) => canvas,
         None => return,
@@ -431,7 +431,7 @@ unsafe fn paint(state: &WizardState) {
         );
     }
 
-    canvas.blit_to_window(state.hwnd);
+    canvas.blit(hdc);
 }
 
 unsafe extern "system" fn wizard_proc(
@@ -443,10 +443,10 @@ unsafe extern "system" fn wizard_proc(
     match message {
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
-            BeginPaint(hwnd, &mut ps);
+            let hdc = BeginPaint(hwnd, &mut ps);
             WIZARD.with(|wizard| {
                 if let Some(state) = wizard.borrow().as_ref() {
-                    paint(state);
+                    paint(state, hdc);
                 }
             });
             EndPaint(hwnd, &ps);

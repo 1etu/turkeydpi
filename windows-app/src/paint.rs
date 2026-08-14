@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, DrawTextW,
     GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
@@ -329,14 +329,6 @@ impl Canvas {
             );
         }
     }
-
-    pub fn blit_to_window(&self, hwnd: HWND) {
-        unsafe {
-            let dc = GetDC(hwnd);
-            self.blit(dc);
-            ReleaseDC(hwnd, dc);
-        }
-    }
 }
 
 impl Drop for Canvas {
@@ -438,3 +430,4 @@ impl Rect {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
     }
 }
+

@@ -262,7 +262,7 @@ fn anchor_position(height: i32) -> (i32, i32) {
     }
 }
 
-unsafe fn paint(state: &MenuState) {
+unsafe fn paint(state: &MenuState, hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
     let width = metrics::MENU_WIDTH;
     let height = state.total_height();
 
@@ -431,7 +431,7 @@ unsafe fn paint(state: &MenuState) {
         }
     }
 
-    canvas.blit_to_window(state.hwnd);
+    canvas.blit(hdc);
 }
 
 unsafe extern "system" fn menu_proc(
@@ -443,10 +443,10 @@ unsafe extern "system" fn menu_proc(
     match message {
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
-            BeginPaint(hwnd, &mut ps);
+            let hdc = BeginPaint(hwnd, &mut ps);
             MENU.with(|menu| {
                 if let Some(state) = menu.borrow().as_ref() {
-                    paint(state);
+                    paint(state, hdc);
                 }
             });
             EndPaint(hwnd, &ps);

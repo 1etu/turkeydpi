@@ -133,7 +133,7 @@ pub fn dismiss() {
     }
 }
 
-unsafe fn paint(state: &ToastState) {
+unsafe fn paint(state: &ToastState, hdc: windows_sys::Win32::Graphics::Gdi::HDC) {
     let canvas = match Canvas::new(metrics::TOAST_WIDTH, metrics::TOAST_HEIGHT) {
         Some(canvas) => canvas,
         None => return,
@@ -179,7 +179,7 @@ unsafe fn paint(state: &ToastState) {
         TextAlign::Wrap,
     );
 
-    canvas.blit_to_window(state.hwnd);
+    canvas.blit(hdc);
 }
 
 unsafe extern "system" fn toast_proc(
@@ -191,10 +191,10 @@ unsafe extern "system" fn toast_proc(
     match message {
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = std::mem::zeroed();
-            BeginPaint(hwnd, &mut ps);
+            let hdc = BeginPaint(hwnd, &mut ps);
             TOAST.with(|toast| {
                 if let Some(state) = toast.borrow().as_ref() {
-                    paint(state);
+                    paint(state, hdc);
                 }
             });
             EndPaint(hwnd, &ps);
