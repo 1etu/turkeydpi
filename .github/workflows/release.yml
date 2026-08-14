@@ -72,7 +72,7 @@ jobs:
           hdiutil create -volname "TurkeyDPI" -srcfolder TurkeyDPI.app -ov -format UDZO "TurkeyDPI-$SUFFIX.dmg"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.target }}
           path: TurkeyDPI-App/*.dmg
@@ -99,7 +99,7 @@ jobs:
           Compress-Archive -Path dist/* -DestinationPath TurkeyDPI-windows-x86_64.zip
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
           path: TurkeyDPI-windows-x86_64.zip
@@ -119,7 +119,7 @@ jobs:
         run: tar -czf TurkeyDPI-linux-x86_64.tar.gz -C target/release turkeydpi
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-x86_64
           path: TurkeyDPI-linux-x86_64.tar.gz
