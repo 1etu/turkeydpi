@@ -13,6 +13,8 @@ mod proxy_thread;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
+mod toast;
+#[cfg(windows)]
 mod theme;
 #[cfg(windows)]
 mod tray;
