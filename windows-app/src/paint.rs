@@ -431,3 +431,30 @@ impl Rect {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Rgb;
+
+    #[test]
+    fn test_canvas_clear_writes_pixels() {
+        let canvas = Canvas::new(8, 8).expect("canvas should be created");
+        canvas.clear(Rgb(0xFF, 0x00, 0x00));
+
+        let first = unsafe { *canvas.pixels };
+        assert_eq!(first & 0x00FF_FFFF, 0x00FF_0000);
+    }
+
+    #[test]
+    fn test_fill_rounded_covers_center() {
+        let canvas = Canvas::new(20, 20).expect("canvas should be created");
+        canvas.clear(Rgb(0, 0, 0));
+        canvas.fill_rounded(Rect::new(0, 0, 20, 20), 4.0, Rgb(0, 0xFF, 0));
+
+        let center = unsafe { *canvas.pixels.add(10 * 20 + 10) };
+        assert_eq!(center & 0x00FF_FFFF, 0x0000_FF00);
+
+        let corner = unsafe { *canvas.pixels };
+        assert_ne!(corner & 0x00FF_FFFF, 0x0000_FF00);
+    }
+}
