@@ -3,6 +3,8 @@
 #[cfg(windows)]
 mod icon;
 #[cfg(windows)]
+mod isp;
+#[cfg(windows)]
 mod paint;
 #[cfg(windows)]
 mod proxy_thread;
