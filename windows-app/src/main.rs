@@ -13,13 +13,13 @@ mod proxy_thread;
 #[cfg(windows)]
 mod settings;
 #[cfg(windows)]
-mod toast;
-#[cfg(windows)]
-mod wizard;
-#[cfg(windows)]
 mod theme;
 #[cfg(windows)]
+mod toast;
+#[cfg(windows)]
 mod tray;
+#[cfg(windows)]
+mod wizard;
 
 #[cfg(windows)]
 fn main() {
