@@ -1,7 +1,9 @@
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpStream};
 use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use engine::BypassConfig;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -13,9 +15,10 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW, GetMessageW, PostMessageW,
     PostQuitMessage, RegisterClassW, RegisterWindowMessageW, TranslateMessage, HICON, MSG, WM_APP,
-    WM_DESTROY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    WM_CLOSE, WM_DESTROY, WM_ENDSESSION, WM_LBUTTONUP, WM_QUERYENDSESSION, WM_RBUTTONUP, WNDCLASSW,
 };
 
+use crate::guard;
 use crate::icon::make_icon;
 use crate::menu::{
     self, MenuModel, ACTION_PRESET_BASE, ACTION_QUIT, ACTION_SETUP, ACTION_TOGGLE, MENU_COMMAND,
@@ -26,6 +29,11 @@ use crate::toast;
 use crate::wizard::{self, CHOICES, WIZARD_DONE};
 
 const TRAY_MESSAGE: u32 = WM_APP + 1;
+pub const PROXY_FAILED: u32 = WM_APP + 3;
+
+const PROBE_TIMEOUT: Duration = Duration::from_millis(300);
+
+static ENGAGED: AtomicBool = AtomicBool::new(false);
 
 struct State {
     hwnd: HWND,
@@ -65,6 +73,64 @@ fn snapshot() -> Option<Snapshot> {
         enabled: state.enabled,
         preset: state.preset,
     })
+}
+
+fn engage(listen: SocketAddr) {
+    guard::arm();
+
+    match sysproxy::enable(&listen.ip().to_string(), listen.port()) {
+        Ok(()) => ENGAGED.store(true, Ordering::SeqCst),
+        Err(_) => guard::disarm(),
+    }
+}
+
+fn release() {
+    let _ = sysproxy::disable();
+    guard::disarm();
+    ENGAGED.store(false, Ordering::SeqCst);
+}
+
+fn is_listening(addr: SocketAddr) -> bool {
+    TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok()
+}
+
+fn recover_stale_proxy(listen: SocketAddr) -> bool {
+    let armed = guard::is_armed();
+
+    let server = match sysproxy::active_server() {
+        Ok(Some(server)) => server,
+        _ => {
+            if armed {
+                guard::disarm();
+            }
+            return false;
+        }
+    };
+
+    if !sysproxy::points_at_loopback(&server) {
+        if armed {
+            guard::disarm();
+        }
+        return false;
+    }
+
+    if !armed && !server.contains(&listen.to_string()) {
+        return false;
+    }
+
+    let addr = server
+        .rsplit('=')
+        .next()
+        .unwrap_or(&server)
+        .parse::<SocketAddr>()
+        .unwrap_or(listen);
+
+    if is_listening(addr) {
+        return false;
+    }
+
+    release();
+    true
 }
 
 pub fn run() {
@@ -112,6 +178,8 @@ pub fn run() {
             .parse()
             .unwrap_or_else(|_| "127.0.0.1:8844".parse().unwrap());
 
+        let recovered = recover_stale_proxy(listen);
+
         let state = State {
             hwnd,
             icon,
@@ -134,11 +202,19 @@ pub fn run() {
         let _ = STATE.set(Mutex::new(state));
         add_tray_icon(&snap);
 
-        if first_run {
+        if recovered {
+            toast::show(
+                "Your connection is back",
+                "TurkeyDPI closed last time without handing the connection back to Windows. That is fixed now, click the icon to turn protection on again.",
+            );
+        } else if first_run {
             toast::show(
                 "TurkeyDPI is running",
                 "It lives in the tray, next to the clock. Click the icon to turn it on or change your provider.",
             );
+        }
+
+        if first_run {
             wizard::show(hwnd, CHOICES[preset].key);
         }
 
@@ -148,7 +224,44 @@ pub fn run() {
             DispatchMessageW(&message);
         }
 
+        teardown();
         shutdown();
+    }
+}
+
+unsafe fn teardown() {
+    if ENGAGED.load(Ordering::SeqCst) {
+        release();
+    } else {
+        guard::disarm();
+    }
+
+    if let Some(snap) = snapshot() {
+        remove_tray_icon(&snap);
+    }
+
+    toast::dismiss();
+}
+
+unsafe fn restore_after_cancelled_shutdown() {
+    let (snap, listen, enabled) = match STATE.get().and_then(|mutex| mutex.lock().ok()) {
+        Some(state) => (
+            Snapshot {
+                hwnd: state.hwnd,
+                icon: state.icon,
+                enabled: state.enabled,
+                preset: state.preset,
+            },
+            state.listen,
+            state.enabled,
+        ),
+        None => return,
+    };
+
+    add_tray_icon(&snap);
+
+    if enabled {
+        engage(listen);
     }
 }
 
@@ -230,7 +343,7 @@ fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
     if enabled {
         let key = CHOICES[state.preset].key;
         let bypass = BypassConfig::preset(key).unwrap_or_default();
-        state.proxy.start(bypass, state.listen);
+        state.proxy.start(bypass, state.listen, state.hwnd as isize);
     } else {
         state.proxy.stop();
     }
@@ -260,7 +373,7 @@ fn apply_preset(index: usize) -> Option<(Snapshot, HICON)> {
 
     if state.enabled {
         let bypass = BypassConfig::preset(CHOICES[index].key).unwrap_or_default();
-        state.proxy.start(bypass, state.listen);
+        state.proxy.start(bypass, state.listen, state.hwnd as isize);
     }
 
     let old_icon = state.icon;
@@ -294,7 +407,7 @@ fn finish_setup(index: usize) -> Option<(Snapshot, HICON, SocketAddr, bool)> {
     state.enabled = true;
 
     let bypass = BypassConfig::preset(CHOICES[index].key).unwrap_or_default();
-    state.proxy.start(bypass, state.listen);
+    state.proxy.start(bypass, state.listen, state.hwnd as isize);
 
     let old_icon = state.icon;
     state.icon = make_icon(true);
@@ -333,9 +446,9 @@ unsafe fn handle_action(action: usize) {
             };
 
             if enabled {
-                let _ = sysproxy::enable(&listen.ip().to_string(), listen.port());
+                engage(listen);
             } else {
-                let _ = sysproxy::disable();
+                release();
             }
 
             refresh(&snap, old_icon);
@@ -352,19 +465,16 @@ unsafe fn handle_action(action: usize) {
         ACTION_QUIT => {
             if let Some(snap) = snapshot() {
                 if snap.enabled {
-                    let _ = sysproxy::disable();
-                    if let Some((snap, old_icon, _)) = apply_toggle(false) {
+                    release();
+                    if let Some((_, old_icon, _)) = apply_toggle(false) {
                         if !old_icon.is_null() {
                             DestroyIcon(old_icon);
                         }
-                        remove_tray_icon(&snap);
                     }
-                } else {
-                    remove_tray_icon(&snap);
                 }
             }
 
-            toast::dismiss();
+            teardown();
             PostQuitMessage(0);
         }
 
@@ -414,7 +524,7 @@ unsafe extern "system" fn window_proc(
             let index = wparam.min(CHOICES.len() - 1);
 
             if let Some((snap, old_icon, listen, was_enabled)) = finish_setup(index) {
-                let _ = sysproxy::enable(&listen.ip().to_string(), listen.port());
+                engage(listen);
                 refresh(&snap, old_icon);
 
                 if !was_enabled {
@@ -432,6 +542,41 @@ unsafe extern "system" fn window_proc(
 
         _ if message == WM_APP + 2 => {
             handle_action(wparam);
+            0
+        }
+
+        PROXY_FAILED => {
+            if let Some((snap, old_icon, listen)) = apply_toggle(false) {
+                release();
+                refresh(&snap, old_icon);
+                toast::show(
+                    "TurkeyDPI turned itself off",
+                    &format!(
+                        "It could not listen on port {}, so your connection went back to Windows untouched. Another program may already be using that port.",
+                        listen.port()
+                    ),
+                );
+            }
+            0
+        }
+
+        WM_QUERYENDSESSION => {
+            teardown();
+            1
+        }
+
+        WM_ENDSESSION => {
+            if wparam == 0 {
+                restore_after_cancelled_shutdown();
+            } else {
+                teardown();
+            }
+            0
+        }
+
+        WM_CLOSE => {
+            teardown();
+            PostQuitMessage(0);
             0
         }
 

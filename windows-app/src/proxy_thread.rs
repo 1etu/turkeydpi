@@ -4,11 +4,16 @@ use std::thread;
 
 use backend::{BypassProxy, ProxyConfig};
 use engine::BypassConfig;
+use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW;
+
+use crate::tray::PROXY_FAILED;
 
 pub enum Command {
     Start {
         bypass: BypassConfig,
         listen: SocketAddr,
+        notify: isize,
     },
     Stop,
     Quit,
@@ -30,8 +35,12 @@ impl ProxyThread {
         }
     }
 
-    pub fn start(&self, bypass: BypassConfig, listen: SocketAddr) {
-        let _ = self.tx.send(Command::Start { bypass, listen });
+    pub fn start(&self, bypass: BypassConfig, listen: SocketAddr, notify: isize) {
+        let _ = self.tx.send(Command::Start {
+            bypass,
+            listen,
+            notify,
+        });
     }
 
     pub fn stop(&self) {
@@ -59,7 +68,11 @@ fn worker(rx: Receiver<Command>) {
 
     while let Ok(command) = rx.recv() {
         match command {
-            Command::Start { bypass, listen } => {
+            Command::Start {
+                bypass,
+                listen,
+                notify,
+            } => {
                 if let Some(task) = running.take() {
                     task.abort();
                 }
@@ -75,6 +88,9 @@ fn worker(rx: Receiver<Command>) {
                     let mut proxy = BypassProxy::new(config);
                     if let Err(e) = proxy.run().await {
                         tracing::error!("proxy stopped: {}", e);
+                        unsafe {
+                            PostMessageW(notify as HWND, PROXY_FAILED, 0, 0);
+                        }
                     }
                 }));
             }

@@ -1,6 +1,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod guard;
+#[cfg(windows)]
 mod icon;
 #[cfg(windows)]
 mod isp;
@@ -23,6 +25,11 @@ mod wizard;
 
 #[cfg(windows)]
 fn main() {
+    if std::env::args().any(|arg| arg == guard::CLEAR_FLAG) {
+        guard::clear();
+        return;
+    }
+
     tray::run();
 }
 
