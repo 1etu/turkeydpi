@@ -31,6 +31,13 @@
   ever tried the first address.
 - The SOCKS5 backend resolved through the system resolver, which is the poisoned one.
 - IPv6 targets in bracket form failed to parse.
+- Windows: restarting the machine with protection on left the system proxy pointing at a
+  dead port, so nothing on the machine reached the internet until TurkeyDPI was opened
+  again. The tray now hands the connection back on shutdown, clears a proxy left behind
+  by an earlier run on startup, and registers a logon cleanup for the times it is killed
+  outright.
+- Windows: the tray kept the system proxy pointing at itself even when the proxy failed
+  to start, for instance when the port was already taken.
 - macOS: force-quitting left the system proxy pointing at a dead port.
 - macOS: killed every TurkeyDPI process on the machine, not its own.
 - `config.example.toml` documented eleven keys the schema never had. Unknown keys are now
