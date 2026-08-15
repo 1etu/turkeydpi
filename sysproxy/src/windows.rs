@@ -71,3 +71,14 @@ pub fn is_enabled() -> Result<bool> {
     let enabled: u32 = settings.get_value("ProxyEnable").unwrap_or(0);
     Ok(enabled == 1)
 }
+
+pub fn active_server() -> Result<Option<String>> {
+    let settings = open_settings(KEY_READ)?;
+
+    let enabled: u32 = settings.get_value("ProxyEnable").unwrap_or(0);
+    if enabled != 1 {
+        return Ok(None);
+    }
+
+    Ok(settings.get_value::<String, _>("ProxyServer").ok())
+}

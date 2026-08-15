@@ -69,3 +69,30 @@ pub fn is_enabled() -> Result<bool> {
 
     Ok(info.lines().any(|line| line.trim() == "Enabled: Yes"))
 }
+
+pub fn active_server() -> Result<Option<String>> {
+    let service = active_service()?;
+    let info = networksetup(&["-getwebproxy", &service])?;
+
+    let mut enabled = false;
+    let mut host = String::new();
+    let mut port = String::new();
+
+    for line in info.lines() {
+        let line = line.trim();
+
+        if let Some(value) = line.strip_prefix("Enabled:") {
+            enabled = value.trim() == "Yes";
+        } else if let Some(value) = line.strip_prefix("Server:") {
+            host = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("Port:") {
+            port = value.trim().to_string();
+        }
+    }
+
+    if !enabled || host.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(format!("{}:{}", host, port)))
+}
