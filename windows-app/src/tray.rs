@@ -205,7 +205,7 @@ pub fn run() {
         if recovered {
             toast::show(
                 "Your connection is back",
-                "TurkeyDPI closed last time without handing the connection back to Windows. That is fixed now, click the icon to turn protection on again.",
+                "TurkeyDPI closed last time without handing the connection back to Windows. Click the icon to turn protection on again.",
             );
         } else if first_run {
             toast::show(
