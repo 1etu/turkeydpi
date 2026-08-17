@@ -50,12 +50,20 @@ pub fn is_listening(addr: SocketAddr) -> bool {
     TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok()
 }
 
-pub fn clear() {
-    disarm();
+fn serving(server: &str) -> bool {
+    server_addr(server).map(is_listening).unwrap_or(false)
+}
 
-    if let Ok(Some(server)) = sysproxy::active_server() {
-        if sysproxy::points_at_loopback(&server) {
+pub fn clear() {
+    match sysproxy::active_server() {
+        Ok(Some(server)) if sysproxy::points_at_loopback(&server) => {
+            if serving(&server) {
+                return;
+            }
+
+            disarm();
             let _ = sysproxy::disable();
         }
+        _ => disarm(),
     }
 }
