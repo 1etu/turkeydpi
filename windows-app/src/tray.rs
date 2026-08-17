@@ -5,8 +5,11 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use engine::BypassConfig;
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, WPARAM,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
@@ -121,8 +124,17 @@ fn recover_stale_proxy(listen: SocketAddr) -> bool {
     true
 }
 
+unsafe fn claim_single_instance() -> bool {
+    let handle = CreateMutexW(null_mut(), 1, wide("Local\\TurkeyDPITray").as_ptr());
+    handle.is_null() || GetLastError() != ERROR_ALREADY_EXISTS
+}
+
 pub fn run() {
     unsafe {
+        if !claim_single_instance() {
+            return;
+        }
+
         let instance = GetModuleHandleW(null());
         let class_name = wide("TurkeyDPITray");
 
