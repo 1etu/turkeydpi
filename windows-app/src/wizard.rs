@@ -87,11 +87,11 @@ thread_local! {
 }
 
 fn list_top() -> i32 {
-    118
+    112
 }
 
 fn row_height() -> i32 {
-    46
+    44
 }
 
 fn primary_rect() -> Rect {
@@ -268,7 +268,7 @@ unsafe fn paint(state: &WizardState, hdc: windows_sys::Win32::Graphics::Gdi::HDC
             );
 
             let cx = metrics::WIZARD_WIDTH as f32 / 2.0;
-            let cy = 214.0;
+            let cy = 236.0;
 
             canvas.ring(cx, cy, 17.0, 2.5, theme.separator);
 
@@ -307,7 +307,7 @@ unsafe fn paint(state: &WizardState, hdc: windows_sys::Win32::Graphics::Gdi::HDC
             );
 
             let choice = &CHOICES[state.selected];
-            let card = Rect::new(margin, 162, content_width, 68);
+            let card = Rect::new(margin, 176, content_width, 68);
 
             canvas.fill_rounded(card, 10.0, theme.surface_raised);
             canvas.stroke_rounded(card, 10.0, theme.accent);

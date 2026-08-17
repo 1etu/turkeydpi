@@ -111,5 +111,5 @@ pub mod metrics {
     pub const TOAST_MARGIN: i32 = 16;
 
     pub const WIZARD_WIDTH: i32 = 440;
-    pub const WIZARD_HEIGHT: i32 = 344;
+    pub const WIZARD_HEIGHT: i32 = 404;
 }
