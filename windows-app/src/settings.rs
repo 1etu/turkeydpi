@@ -9,6 +9,7 @@ pub struct Settings {
     pub setup_done: bool,
     pub listen_port: u16,
     pub detected_provider: Option<String>,
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
@@ -18,6 +19,7 @@ impl Default for Settings {
             setup_done: false,
             listen_port: 8844,
             detected_provider: None,
+            launch_at_login: false,
         }
     }
 }

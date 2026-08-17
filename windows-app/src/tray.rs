@@ -23,10 +23,12 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::guard;
 use crate::icon::make_icon;
 use crate::menu::{
-    self, MenuModel, ACTION_PRESET_BASE, ACTION_QUIT, ACTION_SETUP, ACTION_TOGGLE, MENU_COMMAND,
+    self, MenuModel, ACTION_PRESET_BASE, ACTION_QUIT, ACTION_SETUP, ACTION_STARTUP, ACTION_TOGGLE,
+    MENU_COMMAND,
 };
 use crate::proxy_thread::ProxyThread;
 use crate::settings::Settings;
+use crate::startup;
 use crate::toast;
 use crate::wizard::{self, CHOICES, WIZARD_DONE};
 
@@ -167,8 +169,14 @@ pub fn run() {
         let taskbar_created = RegisterWindowMessageW(wide("TaskbarCreated").as_ptr());
         let icon = make_icon(false);
 
-        let settings = Settings::load();
+        let mut settings = Settings::load();
         let first_run = !settings.setup_done;
+
+        let launch_at_login = startup::reconcile(settings.launch_at_login);
+        if launch_at_login != settings.launch_at_login {
+            settings.launch_at_login = launch_at_login;
+            settings.save();
+        }
 
         let preset = CHOICES
             .iter()
@@ -325,6 +333,7 @@ fn open_menu(hwnd: HWND) {
             enabled: state.enabled,
             preset: state.preset,
             provider: state.provider.clone(),
+            launch_at_login: state.settings.launch_at_login,
             presets: CHOICES
                 .iter()
                 .map(|choice| (choice.name.to_string(), choice.detail.to_string()))
@@ -362,6 +371,19 @@ fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
         old_icon,
         state.listen,
     ))
+}
+
+fn toggle_startup() -> Option<(bool, bool)> {
+    let mutex = STATE.get()?;
+    let mut state = mutex.lock().ok()?;
+
+    let wanted = !state.settings.launch_at_login;
+    let applied = startup::set(wanted);
+
+    state.settings.launch_at_login = applied;
+    state.settings.save();
+
+    Some((wanted, applied))
 }
 
 fn apply_preset(index: usize) -> Option<(Snapshot, HICON)> {
@@ -402,6 +424,7 @@ fn finish_setup(index: usize) -> Option<(Snapshot, HICON, SocketAddr, bool)> {
     state.settings.detected_provider = detected;
     state.settings.preset = CHOICES[index].key.to_string();
     state.settings.setup_done = true;
+    state.settings.launch_at_login = startup::is_enabled();
     state.settings.save();
 
     let was_enabled = state.enabled;
@@ -461,6 +484,17 @@ unsafe fn handle_action(action: usize) {
                 None => return,
             };
             wizard::show(hwnd, CHOICES[preset].key);
+        }
+
+        ACTION_STARTUP => {
+            if let Some((wanted, applied)) = toggle_startup() {
+                if wanted && !applied {
+                    toast::show(
+                        "Could not start with Windows",
+                        "Windows would not let TurkeyDPI add itself to your sign-in programs. Try again after starting it as administrator.",
+                    );
+                }
+            }
         }
 
         ACTION_QUIT => {

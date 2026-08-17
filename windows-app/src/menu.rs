@@ -26,12 +26,14 @@ pub const MENU_COMMAND: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_AP
 pub const ACTION_TOGGLE: usize = 1;
 pub const ACTION_SETUP: usize = 2;
 pub const ACTION_QUIT: usize = 3;
+pub const ACTION_STARTUP: usize = 4;
 pub const ACTION_PRESET_BASE: usize = 100;
 
 pub struct MenuModel {
     pub enabled: bool,
     pub preset: usize,
     pub provider: Option<String>,
+    pub launch_at_login: bool,
     pub presets: Vec<(String, String)>,
 }
 
@@ -42,6 +44,7 @@ enum Row {
     Section,
     Toggle,
     Preset(usize),
+    Startup,
     Setup,
     Quit,
 }
@@ -57,7 +60,10 @@ impl Row {
     }
 
     fn selectable(&self) -> bool {
-        matches!(self, Row::Toggle | Row::Preset(_) | Row::Setup | Row::Quit)
+        matches!(
+            self,
+            Row::Toggle | Row::Preset(_) | Row::Startup | Row::Setup | Row::Quit
+        )
     }
 
     fn action(&self) -> Option<usize> {
@@ -65,6 +71,7 @@ impl Row {
             Row::Toggle => Some(ACTION_TOGGLE),
             Row::Setup => Some(ACTION_SETUP),
             Row::Quit => Some(ACTION_QUIT),
+            Row::Startup => Some(ACTION_STARTUP),
             Row::Preset(index) => Some(ACTION_PRESET_BASE + index),
             _ => None,
         }
@@ -131,6 +138,7 @@ fn build_rows(model: &MenuModel) -> Vec<Row> {
     }
 
     rows.push(Row::Separator);
+    rows.push(Row::Startup);
     rows.push(Row::Setup);
     rows.push(Row::Quit);
     rows
@@ -399,6 +407,35 @@ unsafe fn paint(state: &MenuState, hdc: windows_sys::Win32::Graphics::Gdi::HDC) 
                 canvas.text(
                     state.font_row,
                     name,
+                    Rect::new(
+                        pad + metrics::ROW_TEXT_INSET,
+                        top,
+                        inner_width - metrics::ROW_TEXT_INSET - 12,
+                        row_height,
+                    ),
+                    label_color,
+                    TextAlign::Left,
+                );
+            }
+
+            Row::Startup => {
+                if state.model.launch_at_login {
+                    let tick = if hovered {
+                        theme.text_on_accent
+                    } else {
+                        theme.accent
+                    };
+                    canvas.checkmark(
+                        (pad + 10) as f32,
+                        (top + (row_height - 14) / 2) as f32,
+                        14.0,
+                        tick,
+                    );
+                }
+
+                canvas.text(
+                    state.font_row,
+                    "Start with Windows",
                     Rect::new(
                         pad + metrics::ROW_TEXT_INSET,
                         top,
