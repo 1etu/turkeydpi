@@ -21,6 +21,10 @@ fn entry() -> Option<String> {
     run_key(KEY_READ)?.get_value::<String, _>(ENTRY).ok()
 }
 
+pub fn autostarted() -> bool {
+    std::env::args().any(|arg| arg == AUTOSTART_FLAG)
+}
+
 pub fn is_enabled() -> bool {
     entry().is_some()
 }

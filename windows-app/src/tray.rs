@@ -172,6 +172,9 @@ pub fn run() {
         let mut settings = Settings::load();
         let first_run = !settings.setup_done;
 
+        let autostarted = startup::autostarted();
+        let crashed = guard::is_armed();
+
         let launch_at_login = startup::reconcile(settings.launch_at_login);
         if launch_at_login != settings.launch_at_login {
             settings.launch_at_login = launch_at_login;
@@ -188,6 +191,7 @@ pub fn run() {
             .unwrap_or_else(|_| "127.0.0.1:8844".parse().unwrap());
 
         let recovered = recover_stale_proxy(listen);
+        let resume = settings.active && settings.setup_done;
 
         let state = State {
             hwnd,
@@ -211,7 +215,27 @@ pub fn run() {
         let _ = STATE.set(Mutex::new(state));
         add_tray_icon(&snap);
 
-        if recovered {
+        let resumed = resume && resume_protection();
+
+        if resumed {
+            if crashed {
+                toast::show(
+                    "TurkeyDPI picked itself back up",
+                    &format!(
+                        "The last session ended without shutting down, so protection was turned back on with the {} preset.",
+                        CHOICES[preset].name
+                    ),
+                );
+            } else if !autostarted {
+                toast::show(
+                    "Protection is back on",
+                    &format!(
+                        "TurkeyDPI carried on where it left off, using the {} preset.",
+                        CHOICES[preset].name
+                    ),
+                );
+            }
+        } else if recovered {
             toast::show(
                 "Your connection is back",
                 "TurkeyDPI closed last time without handing the connection back to Windows. Click the icon to turn protection on again.",
@@ -349,6 +373,8 @@ fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
     let mut state = mutex.lock().ok()?;
 
     state.enabled = enabled;
+    state.settings.active = enabled;
+    state.settings.save();
 
     if enabled {
         let key = CHOICES[state.preset].key;
@@ -371,6 +397,17 @@ fn apply_toggle(enabled: bool) -> Option<(Snapshot, HICON, SocketAddr)> {
         old_icon,
         state.listen,
     ))
+}
+
+unsafe fn resume_protection() -> bool {
+    match apply_toggle(true) {
+        Some((snap, old_icon, listen)) => {
+            engage(listen);
+            refresh(&snap, old_icon);
+            true
+        }
+        None => false,
+    }
 }
 
 fn toggle_startup() -> Option<(bool, bool)> {
@@ -425,6 +462,7 @@ fn finish_setup(index: usize) -> Option<(Snapshot, HICON, SocketAddr, bool)> {
     state.settings.preset = CHOICES[index].key.to_string();
     state.settings.setup_done = true;
     state.settings.launch_at_login = startup::is_enabled();
+    state.settings.active = true;
     state.settings.save();
 
     let was_enabled = state.enabled;
