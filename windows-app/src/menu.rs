@@ -18,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_POPUP,
 };
 
-use crate::paint::{make_font, wide, Canvas, Rect, TextAlign, Weight};
+use crate::paint::{arrow_cursor, make_font, wide, Canvas, Rect, TextAlign, Weight};
 use crate::theme::{metrics, Theme};
 
 pub const MENU_COMMAND: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 20;
@@ -161,6 +161,7 @@ pub fn show(owner: HWND, model: MenuModel) {
         class.style = CS_DROPSHADOW;
         class.lpfnWndProc = Some(menu_proc);
         class.hInstance = instance;
+        class.hCursor = arrow_cursor();
         class.lpszClassName = class_name.as_ptr();
         RegisterClassW(&class);
 

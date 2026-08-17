@@ -409,6 +409,15 @@ pub fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+pub fn arrow_cursor() -> windows_sys::Win32::UI::WindowsAndMessaging::HCURSOR {
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::LoadCursorW(
+            null_mut(),
+            windows_sys::Win32::UI::WindowsAndMessaging::IDC_ARROW,
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct Rect {
     pub x: i32,

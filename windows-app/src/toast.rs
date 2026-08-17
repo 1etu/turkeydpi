@@ -15,7 +15,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use crate::paint::{make_font, wide, Canvas, Rect, TextAlign, Weight};
+use crate::paint::{arrow_cursor, make_font, wide, Canvas, Rect, TextAlign, Weight};
 use crate::theme::{metrics, Theme};
 
 const TIMER_FADE_IN: usize = 1;
@@ -50,6 +50,7 @@ pub fn show(title: &str, body: &str) {
         class.style = CS_DROPSHADOW;
         class.lpfnWndProc = Some(toast_proc);
         class.hInstance = instance;
+        class.hCursor = arrow_cursor();
         class.lpszClassName = class_name.as_ptr();
         RegisterClassW(&class);
 

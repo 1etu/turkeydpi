@@ -141,6 +141,7 @@ pub fn run() {
         let mut class: WNDCLASSW = std::mem::zeroed();
         class.lpfnWndProc = Some(window_proc);
         class.hInstance = instance;
+        class.hCursor = crate::paint::arrow_cursor();
         class.lpszClassName = class_name.as_ptr();
         RegisterClassW(&class);
 
