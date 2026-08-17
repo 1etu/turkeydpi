@@ -1,3 +1,6 @@
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
+
 use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 use winreg::RegKey;
 
@@ -5,6 +8,7 @@ pub const CLEAR_FLAG: &str = "--clear-system-proxy";
 
 const RUN_ONCE_PATH: &str = r"Software\Microsoft\Windows\CurrentVersion\RunOnce";
 const ENTRY: &str = "TurkeyDPIClearProxy";
+const PROBE_TIMEOUT: Duration = Duration::from_millis(300);
 
 fn run_once(access: u32) -> Option<RegKey> {
     RegKey::predef(HKEY_CURRENT_USER)
@@ -36,6 +40,14 @@ pub fn is_armed() -> bool {
     run_once(KEY_READ)
         .and_then(|key| key.get_value::<String, _>(ENTRY).ok())
         .is_some()
+}
+
+pub fn server_addr(server: &str) -> Option<SocketAddr> {
+    server.rsplit('=').next()?.trim().parse().ok()
+}
+
+pub fn is_listening(addr: SocketAddr) -> bool {
+    TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok()
 }
 
 pub fn clear() {

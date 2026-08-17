@@ -1,9 +1,8 @@
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use engine::BypassConfig;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -30,8 +29,6 @@ use crate::wizard::{self, CHOICES, WIZARD_DONE};
 
 const TRAY_MESSAGE: u32 = WM_APP + 1;
 pub const PROXY_FAILED: u32 = WM_APP + 3;
-
-const PROBE_TIMEOUT: Duration = Duration::from_millis(300);
 
 static ENGAGED: AtomicBool = AtomicBool::new(false);
 
@@ -90,10 +87,6 @@ fn release() {
     ENGAGED.store(false, Ordering::SeqCst);
 }
 
-fn is_listening(addr: SocketAddr) -> bool {
-    TcpStream::connect_timeout(&addr, PROBE_TIMEOUT).is_ok()
-}
-
 fn recover_stale_proxy(listen: SocketAddr) -> bool {
     let armed = guard::is_armed();
 
@@ -118,14 +111,9 @@ fn recover_stale_proxy(listen: SocketAddr) -> bool {
         return false;
     }
 
-    let addr = server
-        .rsplit('=')
-        .next()
-        .unwrap_or(&server)
-        .parse::<SocketAddr>()
-        .unwrap_or(listen);
+    let addr = guard::server_addr(&server).unwrap_or(listen);
 
-    if is_listening(addr) {
+    if guard::is_listening(addr) {
         return false;
     }
 
