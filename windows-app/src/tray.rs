@@ -224,7 +224,7 @@ pub fn run() {
         }
 
         if first_run {
-            wizard::show(hwnd, CHOICES[preset].key);
+            wizard::show(hwnd, CHOICES[preset].key, true);
         }
 
         let mut message: MSG = std::mem::zeroed();
@@ -483,7 +483,7 @@ unsafe fn handle_action(action: usize) {
                 Some(snap) => (snap.hwnd, snap.preset),
                 None => return,
             };
-            wizard::show(hwnd, CHOICES[preset].key);
+            wizard::show(hwnd, CHOICES[preset].key, startup::is_enabled());
         }
 
         ACTION_STARTUP => {

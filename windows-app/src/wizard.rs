@@ -70,9 +70,11 @@ struct WizardState {
     spin: f32,
     provider: Option<String>,
     selected: usize,
+    start_at_login: bool,
     hover: Option<usize>,
     hover_primary: bool,
     hover_secondary: bool,
+    hover_startup: bool,
     theme: Theme,
     receiver: Option<Receiver<Option<crate::isp::Provider>>>,
     font_title: HFONT,
@@ -92,6 +94,20 @@ fn list_top() -> i32 {
 
 fn row_height() -> i32 {
     44
+}
+
+fn startup_rect() -> Rect {
+    Rect::new(
+        22,
+        metrics::WIZARD_HEIGHT - 104,
+        metrics::WIZARD_WIDTH - 44,
+        26,
+    )
+}
+
+fn checkbox_rect() -> Rect {
+    let row = startup_rect();
+    Rect::new(row.x + 6, row.y + (row.h - 16) / 2, 16, 16)
 }
 
 fn primary_rect() -> Rect {
@@ -115,7 +131,7 @@ pub fn is_open() -> bool {
     WIZARD.with(|wizard| wizard.borrow().is_some())
 }
 
-pub fn show(owner: HWND, current_preset: &str) {
+pub fn show(owner: HWND, current_preset: &str, start_at_login: bool) {
     if is_open() {
         WIZARD.with(|wizard| {
             if let Some(state) = wizard.borrow().as_ref() {
@@ -217,9 +233,11 @@ pub fn show(owner: HWND, current_preset: &str) {
                 spin: 0.0,
                 provider: None,
                 selected,
+                start_at_login,
                 hover: None,
                 hover_primary: false,
                 hover_secondary: false,
+                hover_startup: false,
                 theme,
                 receiver: Some(receiver),
                 font_title: make_font(20, Weight::Semibold),
@@ -396,6 +414,32 @@ unsafe fn paint(state: &WizardState, hdc: windows_sys::Win32::Graphics::Gdi::HDC
     }
 
     if state.stage != Stage::Detecting {
+        let row = startup_rect();
+        if state.hover_startup {
+            canvas.fill_rounded(row, 8.0, theme.surface_raised);
+        }
+
+        let box_rect = checkbox_rect();
+        if state.start_at_login {
+            canvas.fill_rounded(box_rect, 4.5, theme.accent);
+            canvas.checkmark(
+                box_rect.x as f32 + 1.0,
+                box_rect.y as f32 + 1.0,
+                14.0,
+                theme.text_on_accent,
+            );
+        } else {
+            canvas.stroke_rounded(box_rect, 4.5, theme.border);
+        }
+
+        canvas.text(
+            state.font_small,
+            "Start TurkeyDPI when I sign in to Windows",
+            Rect::new(box_rect.x + 26, row.y, row.w - 32, row.h),
+            theme.text_dim,
+            TextAlign::Left,
+        );
+
         let primary = primary_rect();
         let fill = if state.hover_primary {
             theme.accent.mix(crate::theme::Rgb(0, 0, 0), 0.14)
@@ -544,16 +588,20 @@ unsafe extern "system" fn wizard_proc(
                     None
                 };
 
-                let primary = state.stage != Stage::Detecting && primary_rect().contains(x, y);
-                let secondary = state.stage != Stage::Detecting && secondary_rect().contains(x, y);
+                let active = state.stage != Stage::Detecting;
+                let primary = active && primary_rect().contains(x, y);
+                let secondary = active && secondary_rect().contains(x, y);
+                let startup = active && startup_rect().contains(x, y);
 
                 let changed = hover != state.hover
                     || primary != state.hover_primary
-                    || secondary != state.hover_secondary;
+                    || secondary != state.hover_secondary
+                    || startup != state.hover_startup;
 
                 state.hover = hover;
                 state.hover_primary = primary;
                 state.hover_secondary = secondary;
+                state.hover_startup = startup;
                 changed
             });
 
@@ -593,6 +641,11 @@ unsafe extern "system" fn wizard_proc(
                     return Outcome::None;
                 }
 
+                if startup_rect().contains(x, y) {
+                    state.start_at_login = !state.start_at_login;
+                    return Outcome::Repaint;
+                }
+
                 if primary_rect().contains(x, y) {
                     return Outcome::Commit(CHOICES[state.selected].key);
                 }
@@ -625,17 +678,19 @@ unsafe extern "system" fn wizard_proc(
                         wizard
                             .borrow()
                             .as_ref()
-                            .map(|s| (s.owner, s.provider.clone()))
+                            .map(|s| (s.owner, s.provider.clone(), s.start_at_login))
                     });
                     let index = CHOICES.iter().position(|c| c.key == preset).unwrap_or(3);
                     DestroyWindow(hwnd);
 
-                    if let Some((owner, provider)) = info {
+                    if let Some((owner, provider, start_at_login)) = info {
+                        let mut settings = crate::settings::Settings::load();
                         if provider.is_some() {
-                            let mut settings = crate::settings::Settings::load();
                             settings.detected_provider = provider;
-                            settings.save();
                         }
+                        settings.launch_at_login = crate::startup::set(start_at_login);
+                        settings.save();
+
                         PostMessageW(owner, WIZARD_DONE, index, 0);
                     }
                 }
