@@ -1,12 +1,12 @@
 # TurkeyDPI
 
-Türkiye'deki operatörler için DPI atlatma aracı. TLS ve HTTP isteklerini TCP segmentlerine
+Türkiye'deki operatörler için DPI bypass aracı. TLS ve HTTP isteklerini TCP segmentlerine
 bölerek aradaki inceleme kutusunun alan adını bütün olarak görmesini engeller, isim
 çözümlemesini DNS-over-HTTPS üzerinden yaparak operatörün sahte cevap dönmesini önler.
 
 macOS, Windows ve Linux. [English](README.md)
 
-## Hızlı başlangıç
+##  başlangıç
 
 Bağlantınızda hangi profilin çalıştığını bulun:
 
@@ -14,8 +14,8 @@ Bağlantınızda hangi profilin çalıştığını bulun:
 turkeydpi doctor
 ```
 
-Her profili sık engellenen birkaç siteye karşı dener ve hangisinin geçtiğini söyler.
-Sonra çalıştırın:
+Bu komut, TurkeyDPI'da kullandığımız profilleri Türkiye'de erişim engeli bulunan adreslerde dener ve sonuç çıkartır.
+Bu komuttan sonra çalıştırmanız gereken komut: 
 
 ```bash
 turkeydpi bypass --preset turk-telekom
@@ -65,7 +65,7 @@ Menü çubuğu uygulaması; canlı kayıtlar ve açılışta başlatma seçeneğ
 Bütün profiller alan adının *içinde* böler. Farkları, başka nerede kestikleri ve ne kadar
 yavaş gönderdikleridir.
 
-## Sadece gerekeni böl
+## Teknik
 
 Bölme işlemi gidiş dönüş süresi ekler. Sadece birkaç site için gerekiyorsa listeleyin:
 
@@ -73,20 +73,20 @@ Bölme işlemi gidiş dönüş süresi ekler. Sadece birkaç site için gerekiyo
 turkeydpi bypass --domains domains.example.txt
 ```
 
-Listede olmayan her şey tam hızda, dokunulmadan iletilir. `discord.com` alt alan adlarını
-da kapsar; tek bir adresi eşlemek için satırın başına `=` koyun.
+Listede olmayan her şey dokunulmadan iletilir. `discord.com` alt alan adlarını
+da kapsar; tek bir adresi eşlemek için satırın başına `=` koyabilirsiniz.
 
 ## Nasıl çalışır
 
-Operatörler TLS el sıkışmasını inceler. Engelli bir siteye bağlandığınızda ClientHello
+Operatörler TLS handshake girişini inceler. Engelli bir siteye bağlandığınızda ClientHello
 paketi alan adını açık metin olarak taşır:
 
 ```
-İstemci -> Sunucu: TLS ClientHello
-  Kayıt başlığı:  16 03 03 [uzunluk]
-  El sıkışma tipi: 01 (ClientHello)
+Siz -> Sunucu: TLS ClientHello
+  Başlık:  16 03 03 [uzunluk]
+  Tip: 01 (ClientHello)
   Uzantılar:
-    SNI (0x0000): "discord.com"    <- DPI kutusu bunu okur
+    SNI (0x0000): "discord.com"    <- DPI bunu okur
 ```
 
 Bunu engel listesiyle karşılaştırır ve bağlantıyı keser.
@@ -110,19 +110,18 @@ değerin içinden bölünür.
 
 ### DNS
 
-Operatörler DNS cevaplarını da bozar. TurkeyDPI ismi DNS-over-HTTPS ile çözer (sırasıyla
+Operatörler DNS cevaplarını bozar. TurkeyDPI ise bu problemi DNS-over-HTTPS ile çözer (sırasıyla
 Cloudflare, Quad9, Google), sunucunun verdiği TTL süresine uyar ve pes etmeden önce dönen
-bütün adresleri dener. Sistem çözücüsüne **geri dönmez**, çünkü bozulan şey tam olarak
-odur.
+bütün adresleri dener.
 
 ## Bu araç ne yapmaz
 
-- VPN **değildir**, anonimlik aracı **değildir**. Operatörünüz bağlandığınız her adresi
-  görmeye devam eder.
-- Zaten şifreli olmayan hiçbir şeyi şifrelemez.
+- Bu program asla bir VPN **değildir**, anonimlik aracı **değildir**. Operatörünüz bağlandığınız her adresi
+  görebilir.
+- Şifreli olmayan hiçbir şeyi şifrelemez.
 - IP adresi üzerinden yapılan engellemeye karşı işe yaramaz, sadece alan adı incelemesine
   karşı çalışır.
-- Sizi aktif olarak yoklayan bir operatöre karşı koruma sağlamaz.
+- Sizi aktif olarak denetleyen bir operatöre karşı koruma sağlamaz.
 
 ## Derleme
 
