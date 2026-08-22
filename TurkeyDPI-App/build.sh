@@ -15,4 +15,6 @@ cp .build/release/TurkeyDPI "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/"
 chmod +x "$APP/Contents/MacOS/"*
 
+codesign --force --deep --sign - "$APP"
+
 echo "Done: $APP"

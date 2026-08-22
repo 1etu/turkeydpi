@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
     @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var needsApproval = LoginItem.needsApproval
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +35,16 @@ struct MenuBarView: View {
                     if !LoginItem.setEnabled(newValue) {
                         launchAtLogin = LoginItem.isEnabled
                     }
+                    needsApproval = LoginItem.needsApproval
                 }
+
+            if needsApproval {
+                Text("Needs approval in System Settings \u{2192} Login Items")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+            }
 
             Divider()
                 .padding(.top, 8)

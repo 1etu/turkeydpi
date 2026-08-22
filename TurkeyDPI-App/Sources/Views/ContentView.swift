@@ -110,11 +110,18 @@ struct ContainerContextMenu: View {
             }
             
             Divider()
-            
+
+            Toggle("Start Automatically", isOn: Binding(
+                get: { container.config.autoStart },
+                set: { appState.setAutoStart(container, $0) }
+            ))
+
+            Divider()
+
             Button("Clear Logs") {
                 container.clearLogs()
             }
-            
+
             Divider()
             
             Button("Delete", role: .destructive) {

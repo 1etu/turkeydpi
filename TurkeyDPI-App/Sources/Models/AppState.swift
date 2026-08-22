@@ -54,7 +54,12 @@ class AppState: ObservableObject {
         await container.stop()
         objectWillChange.send()
     }
-        
+
+    func setAutoStart(_ container: ProxyContainer, _ enabled: Bool) {
+        container.config.autoStart = enabled
+        saveContainers()
+    }
+
     private func saveContainers() {
         let configs = containers.map { $0.config }
         if let data = try? JSONEncoder().encode(configs) {
@@ -142,7 +147,7 @@ enum ContainerStatus: String {
 @MainActor
 class ProxyContainer: ObservableObject, Identifiable {
     let id: UUID
-    let config: ContainerConfig
+    @Published var config: ContainerConfig
     
     @Published var status: ContainerStatus = .stopped
     @Published var logs: [LogEntry] = []
