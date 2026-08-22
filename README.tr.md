@@ -6,7 +6,7 @@ bölerek aradaki inceleme kutusunun alan adını bütün olarak görmesini engel
 
 macOS, Windows ve Linux. [English](README.md)
 
-##  başlangıç
+## Başlangıç
 
 Bağlantınızda hangi profilin çalıştığını bulun:
 
@@ -67,7 +67,7 @@ yavaş gönderdikleridir.
 
 ## Teknik
 
-Bölme işlemi gidiş dönüş süresi ekler. Sadece birkaç site için gerekiyorsa listeleyin:
+TurkeyDPI arkasında çalışan algoritma; yaptığınız işleme gidiş dönüş süresi ekler. Sadece birkaç site için gerekiyorsa aşağıdaki komut ile listeleyebilirsiniz:
 
 ```bash
 turkeydpi bypass --domains domains.example.txt
@@ -76,7 +76,7 @@ turkeydpi bypass --domains domains.example.txt
 Listede olmayan her şey dokunulmadan iletilir. `discord.com` alt alan adlarını
 da kapsar; tek bir adresi eşlemek için satırın başına `=` koyabilirsiniz.
 
-## Nasıl çalışır
+## Nasıl Çalışır?
 
 Operatörler TLS handshake girişini inceler. Engelli bir siteye bağlandığınızda ClientHello
 paketi alan adını açık metin olarak taşır:
